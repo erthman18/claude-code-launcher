@@ -1,0 +1,483 @@
+use std::process::Command;
+
+pub struct Installer;
+
+impl Installer {
+    pub fn install_nodejs() -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let script = Self::generate_nodejs_install_script_windows();
+            Self::execute_powershell_script(&script)
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let script = Self::generate_nodejs_install_script_macos();
+            Self::execute_terminal_script(&script)
+        }
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        {
+            Err("不支持的操作系统".to_string())
+        }
+    }
+
+    pub fn update_nodejs() -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let script = Self::generate_nodejs_update_script_windows();
+            Self::execute_powershell_script(&script)
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let script = Self::generate_nodejs_update_script_macos();
+            Self::execute_terminal_script(&script)
+        }
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        {
+            Err("不支持的操作系统".to_string())
+        }
+    }
+
+    pub fn install_claude() -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let script = Self::generate_claude_install_script_windows();
+            Self::execute_cmd_script(&script)
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let script = Self::generate_claude_install_script_macos();
+            Self::execute_terminal_script(&script)
+        }
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        {
+            Err("不支持的操作系统".to_string())
+        }
+    }
+
+    pub fn update_claude() -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let script = Self::generate_claude_update_script_windows();
+            Self::execute_cmd_script(&script)
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let script = Self::generate_claude_update_script_macos();
+            Self::execute_terminal_script(&script)
+        }
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        {
+            Err("不支持的操作系统".to_string())
+        }
+    }
+
+    pub fn install_gitbash() -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let script = Self::generate_gitbash_install_script_windows();
+            Self::execute_powershell_script(&script)
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let script = Self::generate_git_install_script_macos();
+            Self::execute_terminal_script(&script)
+        }
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        {
+            Err("不支持的操作系统".to_string())
+        }
+    }
+
+    pub fn update_gitbash() -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let script = Self::generate_gitbash_update_script_windows();
+            Self::execute_powershell_script(&script)
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let script = Self::generate_git_update_script_macos();
+            Self::execute_terminal_script(&script)
+        }
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        {
+            Err("不支持的操作系统".to_string())
+        }
+    }
+
+    // ==================== Windows Scripts ====================
+
+    #[cfg(windows)]
+    fn generate_nodejs_install_script_windows() -> String {
+        r#"
+Write-Host '正在安装 Node.js LTS...' -ForegroundColor Green
+Write-Host ''
+
+$wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
+if (-not $wingetCmd) {
+    Write-Host '✗ winget 不可用' -ForegroundColor Red
+    Write-Host '正在打开 Node.js 下载页面...' -ForegroundColor Yellow
+    Start-Process 'https://nodejs.org/en/download/'
+    Write-Host ''
+    Write-Host '按任意键关闭此窗口...'
+    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+    exit
+}
+
+Write-Host '提示:安装过程中会显示进度条,请耐心等待' -ForegroundColor Yellow
+Write-Host ''
+winget install OpenJS.NodeJS.LTS
+$wingetExitCode = $LASTEXITCODE
+Write-Host ''
+if ($wingetExitCode -eq 0) {
+    Write-Host '✓ 安装成功完成!' -ForegroundColor Green
+} elseif ($wingetExitCode -eq -1978335189 -or $wingetExitCode -eq -1978335212) {
+    Write-Host 'ℹ Node.js 已安装' -ForegroundColor Cyan
+} else {
+    Write-Host "✗ 安装失败! (错误代码: $wingetExitCode)" -ForegroundColor Red
+    winget install OpenJS.NodeJS.LTS --force
+}
+Write-Host ''
+Write-Host '按任意键关闭此窗口...'
+$null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+"#.to_string()
+    }
+
+    #[cfg(windows)]
+    fn generate_nodejs_update_script_windows() -> String {
+        r#"
+Write-Host '正在更新 Node.js...' -ForegroundColor Green
+Write-Host ''
+
+$wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
+if (-not $wingetCmd) {
+    Write-Host '✗ winget 不可用' -ForegroundColor Red
+    Start-Process 'https://nodejs.org/en/download/'
+    Write-Host '按任意键关闭此窗口...'
+    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+    exit
+}
+
+winget upgrade OpenJS.NodeJS.LTS
+Write-Host ''
+Write-Host '按任意键关闭此窗口...'
+$null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+"#.to_string()
+    }
+
+    #[cfg(windows)]
+    fn generate_claude_install_script_windows() -> String {
+        r#"@echo off
+echo Installing Claude Code...
+echo.
+where npm >nul 2>nul
+if %errorlevel%==0 (
+    npm install -g @anthropic-ai/claude-code
+) else (
+    if exist "C:\Program Files\nodejs\npm.cmd" (
+        "C:\Program Files\nodejs\npm.cmd" install -g @anthropic-ai/claude-code
+    ) else (
+        echo npm not found. Please make sure Node.js is installed.
+        pause
+        exit /b 1
+    )
+)
+if %errorlevel%==0 (
+    echo.
+    echo [OK] Installation completed!
+) else (
+    echo.
+    echo [FAILED] Installation failed!
+)
+echo.
+pause"#.to_string()
+    }
+
+    #[cfg(windows)]
+    fn generate_claude_update_script_windows() -> String {
+        r#"@echo off
+echo Updating Claude Code...
+echo.
+where npm >nul 2>nul
+if %errorlevel%==0 (
+    npm install -g @anthropic-ai/claude-code@latest
+) else (
+    if exist "C:\Program Files\nodejs\npm.cmd" (
+        "C:\Program Files\nodejs\npm.cmd" install -g @anthropic-ai/claude-code@latest
+    ) else (
+        echo npm not found.
+        pause
+        exit /b 1
+    )
+)
+echo.
+pause"#.to_string()
+    }
+
+    #[cfg(windows)]
+    fn generate_gitbash_install_script_windows() -> String {
+        r#"
+Write-Host '正在安装 Git...' -ForegroundColor Green
+Write-Host ''
+
+$wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
+if (-not $wingetCmd) {
+    Write-Host '✗ winget 不可用' -ForegroundColor Red
+    Start-Process 'https://git-scm.com/download/windows'
+    Write-Host '按任意键关闭此窗口...'
+    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+    exit
+}
+
+winget install --id Git.Git -e --source winget
+Write-Host ''
+Write-Host '按任意键关闭此窗口...'
+$null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+"#.to_string()
+    }
+
+    #[cfg(windows)]
+    fn generate_gitbash_update_script_windows() -> String {
+        r#"
+Write-Host '正在更新 Git...' -ForegroundColor Green
+Write-Host ''
+
+$wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
+if (-not $wingetCmd) {
+    Write-Host '✗ winget 不可用' -ForegroundColor Red
+    Start-Process 'https://git-scm.com/download/windows'
+    Write-Host '按任意键关闭此窗口...'
+    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+    exit
+}
+
+winget upgrade --id Git.Git -e --source winget
+Write-Host ''
+Write-Host '按任意键关闭此窗口...'
+$null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+"#.to_string()
+    }
+
+    // ==================== macOS Scripts ====================
+
+    #[cfg(target_os = "macos")]
+    fn generate_nodejs_install_script_macos() -> String {
+        r#"
+echo "正在安装 Node.js..."
+echo ""
+
+# Check if Homebrew is installed
+if ! command -v brew &> /dev/null; then
+    echo "✗ Homebrew 未安装"
+    echo "正在安装 Homebrew..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+fi
+
+echo "使用 Homebrew 安装 Node.js..."
+brew install node
+
+if [ $? -eq 0 ]; then
+    echo ""
+    echo "✓ 安装成功完成!"
+    node --version
+else
+    echo ""
+    echo "✗ 安装失败!"
+fi
+
+echo ""
+read -p "按回车键关闭此窗口..."
+"#.to_string()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn generate_nodejs_update_script_macos() -> String {
+        r#"
+echo "正在更新 Node.js..."
+echo ""
+
+if ! command -v brew &> /dev/null; then
+    echo "✗ Homebrew 未安装"
+    exit 1
+fi
+
+brew upgrade node
+
+echo ""
+echo "✓ 更新完成!"
+node --version
+
+read -p "按回车键关闭此窗口..."
+"#.to_string()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn generate_claude_install_script_macos() -> String {
+        r#"
+echo "Installing Claude Code..."
+echo ""
+
+if ! command -v npm &> /dev/null; then
+    echo "✗ npm not found. Please install Node.js first."
+    read -p "Press Enter to close..."
+    exit 1
+fi
+
+npm install -g @anthropic-ai/claude-code
+
+if [ $? -eq 0 ]; then
+    echo ""
+    echo "✓ Installation completed!"
+else
+    echo ""
+    echo "✗ Installation failed!"
+fi
+
+read -p "Press Enter to close..."
+"#.to_string()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn generate_claude_update_script_macos() -> String {
+        r#"
+echo "Updating Claude Code..."
+echo ""
+
+if ! command -v npm &> /dev/null; then
+    echo "✗ npm not found."
+    read -p "Press Enter to close..."
+    exit 1
+fi
+
+npm install -g @anthropic-ai/claude-code@latest
+
+echo ""
+echo "✓ Update completed!"
+
+read -p "Press Enter to close..."
+"#.to_string()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn generate_git_install_script_macos() -> String {
+        r#"
+echo "正在安装 Git..."
+echo ""
+
+# macOS usually has git pre-installed via Xcode Command Line Tools
+if command -v git &> /dev/null; then
+    echo "Git 已安装:"
+    git --version
+    read -p "按回车键关闭此窗口..."
+    exit 0
+fi
+
+# Try Homebrew
+if command -v brew &> /dev/null; then
+    brew install git
+else
+    # Install Xcode Command Line Tools
+    echo "正在安装 Xcode Command Line Tools..."
+    xcode-select --install
+fi
+
+echo ""
+read -p "按回车键关闭此窗口..."
+"#.to_string()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn generate_git_update_script_macos() -> String {
+        r#"
+echo "正在更新 Git..."
+echo ""
+
+if command -v brew &> /dev/null; then
+    brew upgrade git
+    echo ""
+    echo "✓ 更新完成!"
+    git --version
+else
+    echo "请使用 Homebrew 管理 Git 更新"
+fi
+
+read -p "按回车键关闭此窗口..."
+"#.to_string()
+    }
+
+    // ==================== Execution Functions ====================
+
+    #[cfg(windows)]
+    fn execute_powershell_script(script: &str) -> Result<(), String> {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_CONSOLE: u32 = 0x00000010;
+
+        Command::new("powershell")
+            .arg("-Command")
+            .arg(script)
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn()
+            .map_err(|e| format!("无法启动PowerShell: {}", e))?;
+
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn execute_cmd_script(script: &str) -> Result<(), String> {
+        use std::os::windows::process::CommandExt;
+        use std::io::Write;
+        const CREATE_NEW_CONSOLE: u32 = 0x00000010;
+
+        let temp_dir = std::env::temp_dir();
+        let batch_file = temp_dir.join("claude_install.bat");
+
+        let mut file = std::fs::File::create(&batch_file)
+            .map_err(|e| format!("无法创建临时批处理文件: {}", e))?;
+        file.write_all(script.as_bytes())
+            .map_err(|e| format!("无法写入批处理文件: {}", e))?;
+
+        Command::new("cmd")
+            .args(&["/k", batch_file.to_str().unwrap()])
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn()
+            .map_err(|e| format!("无法启动CMD: {}", e))?;
+
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn execute_terminal_script(script: &str) -> Result<(), String> {
+        use std::io::Write;
+
+        // Create temp script file
+        let temp_dir = std::env::temp_dir();
+        let script_file = temp_dir.join("claude_install.sh");
+
+        let mut file = std::fs::File::create(&script_file)
+            .map_err(|e| format!("无法创建临时脚本文件: {}", e))?;
+        file.write_all(script.as_bytes())
+            .map_err(|e| format!("无法写入脚本文件: {}", e))?;
+
+        // Make executable
+        Command::new("chmod")
+            .args(&["+x", script_file.to_str().unwrap()])
+            .output()
+            .map_err(|e| format!("无法设置执行权限: {}", e))?;
+
+        // Open in Terminal.app
+        let apple_script = format!(
+            r#"tell application "Terminal"
+                activate
+                do script "{}"
+            end tell"#,
+            script_file.display()
+        );
+
+        Command::new("osascript")
+            .args(&["-e", &apple_script])
+            .spawn()
+            .map_err(|e| format!("无法启动Terminal: {}", e))?;
+
+        Ok(())
+    }
+}

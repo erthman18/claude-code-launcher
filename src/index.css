@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Microsoft YaHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #212121;
+  color: #DCE4EE;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Enhanced card frames with gradient and shadow */
+.card-frame {
+  background: linear-gradient(145deg, #2B2B2B 0%, #252525 100%);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: box-shadow 0.2s ease;
+}
+
+.card-frame:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* Enhanced button styles */
+.btn-primary {
+  @apply bg-[#3b82f6] hover:bg-[#2563eb] text-white font-medium px-4 py-2.5 rounded-lg transition-all duration-200 ease-in-out;
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-secondary {
+  @apply bg-[#565B5E] hover:bg-[#7A8488] text-white font-medium px-4 py-2 rounded-lg transition-all duration-200;
+}
+
+/* Enhanced input field styling */
+input[type="text"],
+input[type="password"] {
+  transition: all 0.2s ease;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* Smooth transitions for interactive elements */
+button {
+  transition: all 0.2s ease;
+}
+
+/* Dropdown animation */
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dropdown-menu {
+  animation: slideDown 0.2s ease-out;
+}
+
+/* 自定义滚动条样式 */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #2B2B2B;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #565B5E;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #7A8488;
+}
