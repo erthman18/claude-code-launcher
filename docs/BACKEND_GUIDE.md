@@ -1,7 +1,7 @@
 # 后端开发指南
 
 > **技术栈**: Rust + Tauri 2 + Tokio + Windows/macOS API
-> **最后更新**: 2026-01-30
+> **最后更新**: 2026-02-03
 
 ---
 
@@ -25,6 +25,8 @@
 [dependencies]
 tauri = { version = "2", features = [] }     # Tauri 框架
 tauri-plugin-opener = "2"                    # 文件/URL 打开插件
+tauri-plugin-dialog = "2"                    # 对话框插件
+tauri-plugin-clipboard-manager = "2"         # 剪贴板插件 (macOS 必需)
 serde = { version = "1", features = ["derive"] }  # 序列化框架
 serde_json = "1"                            # JSON 序列化
 tokio = { version = "1", features = ["full"] }    # 异步运行时
@@ -117,7 +119,62 @@ pub struct DependencyStatus {
 }
 ```
 
-#### 3.1.2 Node.js 检测
+#### 3.1.2 macOS PATH 扩展
+
+macOS GUI 应用通过 Finder/Dock 启动时不会继承 shell 的 PATH 环境变量（`.zshrc`/`.bash_profile` 不会被加载）。因此需要手动扩展 PATH 来查找 `node` 和 `claude` 命令。
+
+```rust
+#[cfg(target_os = "macos")]
+fn get_macos_extended_path() -> String {
+    let home = dirs::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "".to_string());
+
+    let mut extra_paths: Vec<String> = vec![
+        "/usr/local/bin".to_string(),           // Homebrew (Intel Mac)
+        "/opt/homebrew/bin".to_string(),        // Homebrew (Apple Silicon)
+        "/opt/homebrew/sbin".to_string(),
+    ];
+
+    if !home.is_empty() {
+        extra_paths.push(format!("{}/.npm-global/bin", home));  // npm global
+        extra_paths.push(format!("{}/Library/pnpm", home));     // pnpm
+        extra_paths.push(format!("{}/.local/bin", home));
+        extra_paths.push(format!("{}/.volta/bin", home));       // Volta
+
+        // nvm installations - 动态扫描
+        let nvm_base = format!("{}/.nvm/versions/node", home);
+        if let Ok(entries) = std::fs::read_dir(&nvm_base) {
+            for entry in entries.flatten() {
+                let bin_path = entry.path().join("bin");
+                if bin_path.exists() {
+                    extra_paths.push(bin_path.to_string_lossy().to_string());
+                }
+            }
+        }
+
+        // fnm installations - 动态扫描
+        let fnm_base = format!("{}/Library/Application Support/fnm/node-versions", home);
+        if let Ok(entries) = std::fs::read_dir(&fnm_base) {
+            for entry in entries.flatten() {
+                let bin_path = entry.path().join("installation/bin");
+                if bin_path.exists() {
+                    extra_paths.push(bin_path.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    // 合并到现有 PATH
+    let current_path = env::var("PATH").unwrap_or_default();
+    let mut all_paths: Vec<&str> = extra_paths.iter().map(|s| s.as_str()).collect();
+    all_paths.extend(current_path.split(':'));
+
+    all_paths.join(":")
+}
+```
+
+#### 3.1.3 Node.js 检测
 
 **主要函数**:
 
@@ -125,54 +182,25 @@ pub struct DependencyStatus {
 pub fn check_nodejs() -> DependencyStatus
 ```
 
-**实现逻辑**:
+**实现逻辑** (跨平台):
 
 ```rust
 pub fn check_nodejs() -> DependencyStatus {
-    // 1. 执行 node --version 命令
-    let output = Command::new("node")
-        .args(["--version"])
-        .output();
-
-    match output {
-        Ok(output) if output.status.success() => {
-            let version_str = String::from_utf8_lossy(&output.stdout);
-
-            // 2. 正则提取版本号: v20.10.0 -> 20.10.0
-            let re = Regex::new(r"v(\d+\.\d+\.\d+)").unwrap();
-            if let Some(caps) = re.captures(&version_str) {
-                let version = caps.get(1).unwrap().as_str().to_string();
-
-                // 3. 检查是否满足最低要求 (≥18.0.0)
-                let meets_requirement = compare_versions(&version, "18.0.0") >= 0;
-
-                return DependencyStatus {
-                    installed: true,
-                    version: Some(version),
-                    meets_requirement,
-                    latest_version: None,
-                    update_available: false,
-                    error: None,
-                };
-            }
-        }
-        Err(e) => {
-            // 4. 命令失败，尝试刷新 PATH 后重试
-            eprintln!("Node.js 检测失败: {}", e);
-            return DependencyStatus {
-                installed: false,
-                version: None,
-                meets_requirement: false,
-                latest_version: None,
-                update_available: false,
-                error: Some("未安装或不在 PATH 中".to_string()),
-            };
-        }
-        _ => {}
+    #[cfg(target_os = "macos")]
+    {
+        // macOS: 使用扩展 PATH
+        let extended_path = get_macos_extended_path();
+        let output = Command::new("sh")
+            .args(&["-c", &format!("PATH='{}' node --version", extended_path)])
+            .output();
+        // ... 处理结果
     }
 
-    // 默认返回未安装
-    DependencyStatus::default()
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Windows/Linux: 直接执行
+        Self::check_dependency("node", &["--version"], r"v(\d+\.\d+\.\d+)", Some("18.0.0"))
+    }
 }
 ```
 
@@ -211,7 +239,7 @@ pub fn check_nodejs_with_update() -> DependencyStatus {
 }
 ```
 
-#### 3.1.3 Claude Code 检测
+#### 3.1.4 Claude Code 检测
 
 **主要函数**:
 
@@ -219,80 +247,72 @@ pub fn check_nodejs_with_update() -> DependencyStatus {
 pub fn check_claude() -> DependencyStatus
 ```
 
-**多方法检测**:
+**跨平台检测**:
 
 ```rust
 pub fn check_claude() -> DependencyStatus {
-    // 方法 1: npm list -g @anthropic-ai/claude-code --depth=0
-    let output = Command::new("npm")
-        .args(["list", "-g", "@anthropic-ai/claude-code", "--depth=0"])
+    #[cfg(windows)]
+    Self::refresh_system_path();
+
+    // Windows: 使用 cmd
+    #[cfg(windows)]
+    let output = Command::new("cmd")
+        .args(&["/c", "claude", "--version"])
         .output();
 
-    if let Ok(output) = output {
-        if output.status.success() {
-            let output_str = String::from_utf8_lossy(&output.stdout);
+    // macOS: 使用扩展 PATH
+    #[cfg(target_os = "macos")]
+    let output = {
+        let extended_path = get_macos_extended_path();
+        Command::new("sh")
+            .args(&["-c", &format!("PATH='{}' claude --version", extended_path)])
+            .output()
+    };
 
-            // 匹配多种版本格式
-            // @anthropic-ai/claude-code@2.0.37
-            // claude-code@2.0.37
+    // Linux: 直接执行
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    let output = Command::new("claude")
+        .arg("--version")
+        .output();
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+
+            // 多种版本号格式匹配
             let patterns = vec![
-                r"@anthropic-ai/claude-code@(\d+\.\d+\.\d+)",
-                r"claude-code@(\d+\.\d+\.\d+)",
+                r"(\d+\.\d+\.\d+)\s*\(Claude Code\)",
+                r"v(\d+\.\d+\.\d+)",
+                r"^(\d+\.\d+\.\d+)",
+                r"(\d+\.\d+\.\d+)",
             ];
 
             for pattern in patterns {
-                let re = Regex::new(pattern).unwrap();
-                if let Some(caps) = re.captures(&output_str) {
-                    let version = caps.get(1).unwrap().as_str().to_string();
-
-                    return DependencyStatus {
-                        installed: true,
-                        version: Some(version),
-                        meets_requirement: true,
-                        latest_version: None,
-                        update_available: false,
-                        error: None,
-                    };
+                if let Ok(re) = Regex::new(pattern) {
+                    if let Some(caps) = re.captures(&stdout) {
+                        let version = caps.get(1).map(|m| m.as_str().to_string());
+                        return DependencyStatus {
+                            installed: true,
+                            version,
+                            meets_requirement: true,
+                            ..Default::default()
+                        };
+                    }
                 }
             }
+            // 已安装但无法解析版本
+            DependencyStatus { installed: true, ..Default::default() }
         }
-    }
-
-    // 方法 2: claude --version
-    if let Ok(output) = Command::new("claude").args(["--version"]).output() {
-        if output.status.success() {
-            let version_str = String::from_utf8_lossy(&output.stdout);
-
-            // 提取版本号
-            let re = Regex::new(r"(\d+\.\d+\.\d+)").unwrap();
-            if let Some(caps) = re.captures(&version_str) {
-                let version = caps.get(1).unwrap().as_str().to_string();
-
-                return DependencyStatus {
-                    installed: true,
-                    version: Some(version),
-                    meets_requirement: true,
-                    latest_version: None,
-                    update_available: false,
-                    error: None,
-                };
-            }
-        }
-    }
-
-    // 两种方法都失败，返回未安装
-    DependencyStatus {
-        installed: false,
-        version: None,
-        meets_requirement: false,
-        latest_version: None,
-        update_available: false,
-        error: Some("未安装或不在 PATH 中".to_string()),
+        _ => DependencyStatus {
+            installed: false,
+            error: Some("Claude Code not found".to_string()),
+            ..Default::default()
+        },
     }
 }
 ```
 
-#### 3.1.4 Git Bash 检测 (Windows)
+#### 3.1.5 Git Bash 检测 (Windows)
 
 **主要函数**:
 
@@ -412,7 +432,7 @@ pub async fn check_claude_with_update() -> DependencyStatus {
 }
 ```
 
-#### 3.1.4 版本比较
+#### 3.1.6 版本比较
 
 ```rust
 fn compare_versions(v1: &str, v2: &str) -> i32 {
@@ -438,7 +458,7 @@ fn compare_versions(v1: &str, v2: &str) -> i32 {
 }
 ```
 
-#### 3.1.5 刷新系统 PATH
+#### 3.1.7 刷新系统 PATH (Windows)
 
 ```rust
 #[cfg(windows)]
@@ -651,7 +671,7 @@ fn open_nodejs_download_page() -> Result<(), String> {
 
 ### 3.3 launcher.rs - 启动器服务
 
-#### 3.3.1 启动 Claude Code
+#### 3.3.1 启动 Claude Code (Windows)
 
 ```rust
 use std::collections::HashMap;
@@ -671,7 +691,6 @@ pub fn launch_with_config(config: HashMap<String, String>) -> Result<(), String>
     // 3. 构建 PowerShell 脚本
     let mut env_vars = Vec::new();
     for (key, value) in config {
-        // 转义特殊字符
         let escaped_value = value.replace("\"", "`\"");
         env_vars.push(format!("$env:{}=\"{}\"", key, escaped_value));
     }
@@ -684,15 +703,50 @@ pub fn launch_with_config(config: HashMap<String, String>) -> Result<(), String>
     use windows::Win32::System::Threading::CREATE_NEW_CONSOLE;
 
     Command::new("powershell")
-        .args([
-            "-NoExit",           // 保持窗口打开
-            "-NoProfile",
-            "-Command", &script,
-        ])
-        .current_dir(home_dir)   // 在主目录启动
+        .args(["-NoExit", "-NoProfile", "-Command", &script])
+        .current_dir(home_dir)
         .creation_flags(CREATE_NEW_CONSOLE.0)
         .spawn()
         .map_err(|e| format!("启动失败: {}", e))?;
+
+    Ok(())
+}
+```
+
+#### 3.3.2 启动 Claude Code (macOS)
+
+**重要**: macOS 上不预检查 `claude` 命令是否存在，因为:
+1. Terminal.app 以登录 shell 启动，会加载 `.zshrc`/`.bash_profile`
+2. 因此 Terminal 中的 PATH 是完整的（包含 npm global、homebrew、nvm 等）
+3. 而 GUI 应用不继承这些 PATH，`which claude` 会失败即使 claude 已安装
+4. 如果 claude 真的未安装，用户会在 Terminal 中直接看到错误
+
+```rust
+#[cfg(target_os = "macos")]
+fn execute_macos(command: &str, working_dir: Option<String>) -> Result<(), String> {
+    // 注意: 不检查 claude 是否存在，因为 Terminal 中 PATH 是正确的
+
+    let target_dir = working_dir.unwrap_or_else(|| {
+        dirs::home_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "~".to_string())
+    });
+
+    // 使用 osascript 打开 Terminal.app
+    // Terminal.app 默认以登录 shell 启动，PATH 会是完整的
+    let script = format!(
+        r#"tell application "Terminal"
+            activate
+            do script "cd '{}' && echo 'Starting Claude Code...' && {}"
+        end tell"#,
+        target_dir.replace("'", "'\\''"),
+        command.replace("\"", "\\\"")
+    );
+
+    Command::new("osascript")
+        .args(&["-e", &script])
+        .spawn()
+        .map_err(|e| format!("无法启动Terminal: {}", e))?;
 
     Ok(())
 }

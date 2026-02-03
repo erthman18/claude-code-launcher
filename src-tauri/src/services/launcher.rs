@@ -5,7 +5,11 @@ pub struct Launcher;
 
 impl Launcher {
     pub fn launch_with_config(config: HashMap<String, String>) -> Result<(), String> {
-        Self::launch_with_temp_env(config)
+        Self::launch_with_temp_env(config, None)
+    }
+
+    pub fn launch_with_config_and_dir(config: HashMap<String, String>, working_dir: Option<String>) -> Result<(), String> {
+        Self::launch_with_temp_env(config, working_dir)
     }
 
     pub fn launch_simple() -> Result<(), String> {
@@ -15,7 +19,7 @@ impl Launcher {
         }
         #[cfg(target_os = "macos")]
         {
-            Self::execute_macos("claude")
+            Self::execute_macos("claude", None)
         }
         #[cfg(all(not(windows), not(target_os = "macos")))]
         {
@@ -23,7 +27,7 @@ impl Launcher {
         }
     }
 
-    fn launch_with_temp_env(config: HashMap<String, String>) -> Result<(), String> {
+    fn launch_with_temp_env(config: HashMap<String, String>, working_dir: Option<String>) -> Result<(), String> {
         let ordered_keys = [
             "ANTHROPIC_MODEL",
             "ANTHROPIC_BASE_URL",
@@ -52,6 +56,7 @@ impl Launcher {
             }
             commands.push(claude_cmd.to_string());
             let full_command = format!("& {{ {} }}", commands.join("; "));
+            let _ = working_dir; // Windows uses existing logic
             Self::execute_windows(&full_command)
         }
 
@@ -68,7 +73,7 @@ impl Launcher {
             }
             env_exports.push(claude_cmd.to_string());
             let full_command = env_exports.join(" && ");
-            Self::execute_macos(&full_command)
+            Self::execute_macos(&full_command, working_dir)
         }
 
         #[cfg(all(not(windows), not(target_os = "macos")))]
@@ -125,27 +130,27 @@ impl Launcher {
     }
 
     #[cfg(target_os = "macos")]
-    fn execute_macos(command: &str) -> Result<(), String> {
-        // Check if claude command exists
-        let check = Command::new("which")
-            .arg("claude")
-            .output()
-            .map_err(|e| format!("无法检查Claude命令: {}", e))?;
+    fn execute_macos(command: &str, working_dir: Option<String>) -> Result<(), String> {
+        // Note: We don't check for claude existence here because:
+        // 1. Terminal.app will launch with a login shell that loads .zshrc/.bash_profile
+        // 2. This means PATH will include npm global bin, homebrew, nvm, etc.
+        // 3. The GUI app doesn't have this PATH, so `which claude` would fail even when claude is installed
+        // 4. If claude is not installed, the user will see the error directly in Terminal
 
-        if !check.status.success() || check.stdout.is_empty() {
-            return Err("Claude Code未安装或未在PATH中。请先安装Claude Code。".to_string());
-        }
-
-        let home_dir = dirs::home_dir()
-            .ok_or("无法获取用户主目录".to_string())?;
+        let target_dir = working_dir.unwrap_or_else(|| {
+            dirs::home_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "~".to_string())
+        });
 
         // Use osascript to open Terminal.app with the command
+        // Terminal.app runs as a login shell by default, so PATH will be correct
         let script = format!(
             r#"tell application "Terminal"
                 activate
-                do script "cd {} && echo 'Starting Claude Code...' && {}"
+                do script "cd '{}' && echo 'Starting Claude Code...' && {}"
             end tell"#,
-            home_dir.display(),
+            target_dir.replace("'", "'\\''"),
             command.replace("\"", "\\\"")
         );
 
@@ -246,5 +251,33 @@ impl Launcher {
         };
         commands.push(claude_cmd);
         commands.join(" && ")
+    }
+
+    // With working directory variants
+    pub fn generate_powershell_command_with_dir(config: &HashMap<String, String>, working_dir: Option<String>) -> String {
+        let base = Self::generate_powershell_command(config);
+        if let Some(dir) = working_dir {
+            format!("cd \"{}\"; {}", dir, base)
+        } else {
+            base
+        }
+    }
+
+    pub fn generate_cmd_command_with_dir(config: &HashMap<String, String>, working_dir: Option<String>) -> String {
+        let base = Self::generate_cmd_command(config);
+        if let Some(dir) = working_dir {
+            format!("cd /d \"{}\" & {}", dir, base)
+        } else {
+            base
+        }
+    }
+
+    pub fn generate_bash_command_with_dir(config: &HashMap<String, String>, working_dir: Option<String>) -> String {
+        let base = Self::generate_bash_command(config);
+        if let Some(dir) = working_dir {
+            format!("cd '{}' && {}", dir.replace("'", "'\\''"), base)
+        } else {
+            base
+        }
     }
 }
