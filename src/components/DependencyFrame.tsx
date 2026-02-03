@@ -10,8 +10,20 @@ export const DependencyFrame = () => {
   const [claudeLoading, setClaudeLoading] = useState(false);
   const [gitbashLoading, setGitbashLoading] = useState(false);
 
-  // 自动检测(启动时)
+  // 自动检测(启动时)，使用 sessionStorage 缓存避免重复检测
   useEffect(() => {
+    const cached = sessionStorage.getItem('dependencyStatus');
+    if (cached) {
+      try {
+        const { nodejs, claude, gitbash } = JSON.parse(cached);
+        setNodejsStatus(nodejs);
+        setClaudeStatus(claude);
+        setGitbashStatus(gitbash);
+        return;
+      } catch (e) {
+        // 缓存解析失败，重新检测
+      }
+    }
     setTimeout(() => {
       checkInstallationOnly();
     }, 100);
@@ -30,12 +42,21 @@ export const DependencyFrame = () => {
       const gitbashResult = await api.checkGitbash();
       await new Promise(resolve => setTimeout(resolve, 200));
       setGitbashStatus(gitbashResult);
+
+      // 缓存检测结果到 sessionStorage
+      sessionStorage.setItem('dependencyStatus', JSON.stringify({
+        nodejs: nodeResult,
+        claude: claudeResult,
+        gitbash: gitbashResult,
+      }));
     } catch (error) {
       console.error('检测失败:', error);
     }
   };
 
   const checkWithUpdates = async () => {
+    // 清除缓存，重新检测
+    sessionStorage.removeItem('dependencyStatus');
     setNodejsStatus(null);
     setClaudeStatus(null);
     setGitbashStatus(null);
@@ -261,7 +282,7 @@ export const DependencyFrame = () => {
   };
 
   return (
-    <div className="px-5 py-2">
+    <div className="px-5 py-2" data-onboarding="dependencies">
       <div className="card-frame">
         <div className="flex items-center gap-4">
           <h2 className="text-base font-bold">系统依赖(先装node)</h2>

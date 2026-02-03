@@ -38,6 +38,8 @@ impl Default for AppConfig {
 pub struct AppConfigV2 {
     pub version: u32,
     pub projects: Vec<Project>,
+    #[serde(default)]
+    pub has_seen_onboarding: bool,
 }
 
 impl Default for AppConfigV2 {
@@ -45,6 +47,7 @@ impl Default for AppConfigV2 {
         Self {
             version: 2,
             projects: vec![Project::default_project()],
+            has_seen_onboarding: false,
         }
     }
 }
@@ -97,6 +100,7 @@ impl ConfigStorage {
         AppConfigV2 {
             version: 2,
             projects: vec![default_project],
+            has_seen_onboarding: false,
         }
     }
 
@@ -361,6 +365,19 @@ impl ConfigStorage {
             is_pinned: Some(is_pinned),
         };
         Self::update_project(id, updates)
+    }
+
+    /// Get onboarding status
+    pub fn get_onboarding_status() -> Result<bool, String> {
+        let config = Self::load_config_v2()?;
+        Ok(config.has_seen_onboarding)
+    }
+
+    /// Set onboarding as completed
+    pub fn set_onboarding_completed() -> Result<(), String> {
+        let mut config = Self::load_config_v2()?;
+        config.has_seen_onboarding = true;
+        Self::save_config_v2(&config)
     }
 
     // ============ Legacy v1 API for backwards compatibility ============

@@ -46,6 +46,9 @@ pub fn run() {
             commands::update_projects_order,
             commands::update_pinned_order,
             commands::toggle_project_pinned,
+            // Onboarding commands
+            commands::get_onboarding_status,
+            commands::set_onboarding_completed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

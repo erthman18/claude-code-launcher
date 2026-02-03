@@ -282,3 +282,13 @@ pub fn update_pinned_order(orders: Vec<PinnedOrderItem>) -> Result<(), String> {
 pub fn toggle_project_pinned(id: String, is_pinned: bool) -> Result<Project, String> {
     ConfigStorage::toggle_project_pinned(&id, is_pinned)
 }
+
+#[tauri::command]
+pub fn get_onboarding_status() -> Result<bool, String> {
+    ConfigStorage::get_onboarding_status()
+}
+
+#[tauri::command]
+pub fn set_onboarding_completed() -> Result<(), String> {
+    ConfigStorage::set_onboarding_completed()
+}
