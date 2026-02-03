@@ -1,21 +1,107 @@
 use std::collections::HashMap;
 use std::process::Command;
+use std::path::PathBuf;
 
 pub struct Launcher;
 
 impl Launcher {
+    fn escape_ps_single_quotes(value: &str) -> String {
+        value.replace('\'', "''")
+    }
+
+    #[cfg(windows)]
+    fn launcher_log_path() -> std::path::PathBuf {
+        // Prefer LocalAppData so logs survive across runs and are easy to find on Windows.
+        // Fallback to TEMP if LocalAppData is unavailable for some reason.
+        let base = dirs::data_local_dir().unwrap_or_else(std::env::temp_dir);
+        base.join("ClaudeCodeLauncher").join("logs").join("launcher.log")
+    }
+
+    #[cfg(windows)]
+    fn launcher_transcript_path() -> std::path::PathBuf {
+        let mut p = Self::launcher_log_path();
+        p.set_file_name("powershell-transcript.log");
+        p
+    }
+
+    #[cfg(windows)]
+    fn launcher_run_log_path() -> std::path::PathBuf {
+        let mut p = Self::launcher_log_path();
+        p.set_file_name("claude-run.log");
+        p
+    }
+
+    #[cfg(windows)]
+    fn log_line(line: &str) {
+        use std::fs::OpenOptions;
+        use std::io::Write;
+
+        let path = Self::launcher_log_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
+            let _ = writeln!(f, "[{}] {}", ts, line);
+        }
+    }
+
+    #[cfg(windows)]
+    fn sanitize_command_for_log(command: &str) -> String {
+        // Avoid writing secrets into logs. We only redact known sensitive env vars.
+        // The current command format uses single quotes: $env:KEY='value'.
+        let mut out = command.to_string();
+        for key in ["ANTHROPIC_AUTH_TOKEN"] {
+            let needle = format!("$env:{}='", key);
+            let mut search_from = 0usize;
+            while let Some(start) = out[search_from..].find(&needle) {
+                let start = search_from + start + needle.len();
+                if let Some(end_rel) = out[start..].find('\'') {
+                    let end = start + end_rel;
+                    out.replace_range(start..end, "<redacted>");
+                    search_from = end + 1;
+                } else {
+                    break;
+                }
+            }
+        }
+        out
+    }
+
+    #[cfg(windows)]
+    fn encode_powershell_encoded_command(command: &str) -> String {
+        // PowerShell's -EncodedCommand expects UTF-16LE bytes, Base64-encoded.
+        use base64::{engine::general_purpose, Engine as _};
+
+        let mut bytes = Vec::with_capacity(command.len() * 2);
+        for unit in command.encode_utf16() {
+            bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+
+        general_purpose::STANDARD.encode(bytes)
+    }
+
     pub fn launch_with_config(config: HashMap<String, String>) -> Result<(), String> {
-        Self::launch_with_temp_env(config)
+        Self::launch_with_temp_env(config, None)
+    }
+
+    pub fn launch_with_config_and_dir(config: HashMap<String, String>, working_directory: Option<String>) -> Result<(), String> {
+        Self::launch_with_temp_env(config, working_directory)
     }
 
     pub fn launch_simple() -> Result<(), String> {
         #[cfg(windows)]
         {
-            Self::execute_windows("claude")
+            Self::execute_windows("claude", None)
         }
         #[cfg(target_os = "macos")]
         {
-            Self::execute_macos("claude")
+            Self::execute_macos("claude", None)
         }
         #[cfg(all(not(windows), not(target_os = "macos")))]
         {
@@ -23,7 +109,7 @@ impl Launcher {
         }
     }
 
-    fn launch_with_temp_env(config: HashMap<String, String>) -> Result<(), String> {
+    fn launch_with_temp_env(config: HashMap<String, String>, working_directory: Option<String>) -> Result<(), String> {
         let ordered_keys = [
             "ANTHROPIC_MODEL",
             "ANTHROPIC_BASE_URL",
@@ -45,14 +131,14 @@ impl Launcher {
             for key in ordered_keys.iter() {
                 if let Some(value) = config.get(*key) {
                     if !value.is_empty() {
-                        let escaped_value = value.replace("\"", "`\"");
-                        commands.push(format!("$env:{}=\"{}\"", key, escaped_value));
+                        let escaped_value = Self::escape_ps_single_quotes(value);
+                        commands.push(format!("$env:{}='{}'", key, escaped_value));
                     }
                 }
             }
             commands.push(claude_cmd.to_string());
-            let full_command = format!("& {{ {} }}", commands.join("; "));
-            Self::execute_windows(&full_command)
+            let full_command = commands.join("; ");
+            Self::execute_windows(&full_command, working_directory)
         }
 
         #[cfg(target_os = "macos")]
@@ -68,7 +154,7 @@ impl Launcher {
             }
             env_exports.push(claude_cmd.to_string());
             let full_command = env_exports.join(" && ");
-            Self::execute_macos(&full_command)
+            Self::execute_macos(&full_command, working_directory)
         }
 
         #[cfg(all(not(windows), not(target_os = "macos")))]
@@ -78,54 +164,142 @@ impl Launcher {
     }
 
     #[cfg(windows)]
-    fn execute_windows(command: &str) -> Result<(), String> {
+    fn execute_windows(command: &str, working_directory: Option<String>) -> Result<(), String> {
         use std::os::windows::process::CommandExt;
         const CREATE_NEW_CONSOLE: u32 = 0x00000010;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+        Self::log_line("=== launch start ===");
+        Self::log_line(&format!("raw command: {}", Self::sanitize_command_for_log(command)));
+        if let Some(ref wd) = working_directory {
+            Self::log_line(&format!("working_directory arg: {}", wd));
+        } else {
+            Self::log_line("working_directory arg: <none>");
+        }
+
+        // GUI apps can have a stale PATH after installs; refresh from registry so `claude` is discoverable.
+        super::dependency_checker::DependencyChecker::refresh_system_path();
+        Self::log_line(&format!("PATH len: {}", std::env::var("PATH").unwrap_or_default().len()));
+
         // First check if claude command exists
-        let check = Command::new("powershell")
+        let check = Command::new("powershell.exe")
             .args(&["-Command", "where.exe claude 2>$null"])
             .creation_flags(CREATE_NO_WINDOW)
             .output()
             .map_err(|e| format!("无法检查Claude命令: {}", e))?;
 
+        Self::log_line(&format!(
+            "where.exe claude exit={:?} stdout={}B stderr={}B",
+            check.status.code(),
+            check.stdout.len(),
+            check.stderr.len()
+        ));
+
         if !check.status.success() || check.stdout.is_empty() {
-            let npm_check = Command::new("powershell")
+            let npm_check = Command::new("powershell.exe")
                 .args(&["-Command", "npm list -g @anthropic-ai/claude-code --depth=0 2>$null"])
                 .creation_flags(CREATE_NO_WINDOW)
                 .output()
                 .map_err(|e| format!("无法检查npm包: {}", e))?;
+
+            Self::log_line(&format!(
+                "npm list -g @anthropic-ai/claude-code exit={:?} stdout={}B stderr={}B",
+                npm_check.status.code(),
+                npm_check.stdout.len(),
+                npm_check.stderr.len()
+            ));
 
             if !npm_check.status.success() {
                 return Err("Claude Code未安装或未在PATH中。请先安装Claude Code。".to_string());
             }
         }
 
-        let home_dir = dirs::home_dir()
-            .ok_or("无法获取用户主目录".to_string())?;
+        // Determine the working directory
+        let work_dir: PathBuf = if let Some(ref dir) = working_directory {
+            let path = PathBuf::from(dir);
+            if path.exists() && path.is_dir() {
+                path
+            } else {
+                return Err(format!("工作目录不存在: {}", dir));
+            }
+        } else {
+            dirs::home_dir()
+                .ok_or("无法获取用户主目录".to_string())?
+        };
 
-        let enhanced_command = format!(
-            "Write-Host 'Starting Claude Code...' -ForegroundColor Green; {}; if ($LASTEXITCODE -ne 0) {{ Write-Host 'Claude Code exited with error' -ForegroundColor Red; Read-Host 'Press Enter to exit' }}",
-            command
+        // Capture *all* output into a log file, but still show it in the terminal.
+        //
+        // Important: this app is a GUI process (no console). If we spawn PowerShell directly,
+        // the child can end up without a usable stdin/tty, and `claude` will exit immediately.
+        // Using `cmd.exe /c start ...` reliably creates a real console with interactive stdin.
+        let transcript_path = Self::launcher_transcript_path();
+        let transcript_path_str = transcript_path.to_string_lossy();
+        let transcript_path_escaped = Self::escape_ps_single_quotes(&transcript_path_str);
+
+        let run_log_path = Self::launcher_run_log_path();
+        let run_log_path_str = run_log_path.to_string_lossy();
+        let run_log_path_escaped = Self::escape_ps_single_quotes(&run_log_path_str);
+
+        Self::log_line(&format!("transcript path: {}", transcript_path_str));
+        Self::log_line(&format!("run log path: {}", run_log_path_str));
+
+        // Do not pipe/redirect `claude` output here: if stdout is not a TTY,
+        // Claude Code may switch to non-interactive mode and exit immediately.
+        // Transcript should still capture the most useful errors without breaking TTY detection.
+        let ps = format!(
+            concat!(
+                "$ErrorActionPreference='Continue'; ",
+                "$ProgressPreference='SilentlyContinue'; ",
+                "try {{ Start-Transcript -Path '{}' -Append -Force | Out-Null }} catch {{}}; ",
+                "'' | Out-File -FilePath '{}' -Append -Encoding utf8; ",
+                "'[launcher] ' + (Get-Date).ToString('s') + ' cwd=' + (Get-Location).Path | Out-File -FilePath '{}' -Append -Encoding utf8; ",
+                "try {{ {} }} catch {{ $_ | Out-Host }}; ",
+                "$ec = $LASTEXITCODE; ",
+                "'[launcher] exit code: ' + $ec | Out-File -FilePath '{}' -Append -Encoding utf8; ",
+                "try {{ Stop-Transcript | Out-Null }} catch {{}}; ",
+                "Read-Host '[launcher] press Enter to close' | Out-Null;"
+            ),
+            transcript_path_escaped,
+            run_log_path_escaped,
+            run_log_path_escaped,
+            command,
+            run_log_path_escaped,
         );
 
-        Command::new("powershell")
-            .args(&[
-                "-NoExit",
-                "-ExecutionPolicy", "Bypass",
-                "-Command", &enhanced_command
-            ])
-            .current_dir(home_dir)
-            .creation_flags(CREATE_NEW_CONSOLE)
-            .spawn()
-            .map_err(|e| format!("无法启动PowerShell: {}", e))?;
+        let encoded = Self::encode_powershell_encoded_command(&ps);
+        Self::log_line(&format!("encoded_command length: {}", encoded.len()));
 
+        // Start a new console window and keep it open for interactive use and debugging.
+        Command::new("cmd.exe")
+            .current_dir(&work_dir)
+            .args(&[
+                "/c",
+                "start",
+                "Claude Code",
+                "powershell.exe",
+                "-NoExit",
+                "-NoLogo",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-EncodedCommand",
+                &encoded,
+            ])
+            // Hide the intermediate `cmd.exe` window; `start` will create the visible PowerShell window.
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| {
+                Self::log_line(&format!("spawn cmd.exe failed: {}", e));
+                format!("无法启动CMD: {}", e)
+            })?;
+
+        Self::log_line("spawned cmd.exe start OK");
+        Self::log_line("=== launch end ===");
         Ok(())
     }
 
     #[cfg(target_os = "macos")]
-    fn execute_macos(command: &str) -> Result<(), String> {
+    fn execute_macos(command: &str, working_directory: Option<String>) -> Result<(), String> {
         // Check if claude command exists
         let check = Command::new("which")
             .arg("claude")
@@ -136,16 +310,27 @@ impl Launcher {
             return Err("Claude Code未安装或未在PATH中。请先安装Claude Code。".to_string());
         }
 
-        let home_dir = dirs::home_dir()
-            .ok_or("无法获取用户主目录".to_string())?;
+        // Determine the working directory
+        let work_dir: PathBuf = if let Some(ref dir) = working_directory {
+            let path = PathBuf::from(dir);
+            if path.exists() && path.is_dir() {
+                path
+            } else {
+                return Err(format!("工作目录不存在: {}", dir));
+            }
+        } else {
+            dirs::home_dir()
+                .ok_or("无法获取用户主目录".to_string())?
+        };
 
         // Use osascript to open Terminal.app with the command
         let script = format!(
             r#"tell application "Terminal"
                 activate
-                do script "cd {} && echo 'Starting Claude Code...' && {}"
+                do script "cd \"{}\" && echo 'Starting Claude Code in: {}' && {}"
             end tell"#,
-            home_dir.display(),
+            work_dir.display(),
+            work_dir.display(),
             command.replace("\"", "\\\"")
         );
 
@@ -159,6 +344,10 @@ impl Launcher {
 
     // Windows: PowerShell command
     pub fn generate_powershell_command(config: &HashMap<String, String>) -> String {
+        Self::generate_powershell_command_with_dir(config, None)
+    }
+
+    pub fn generate_powershell_command_with_dir(config: &HashMap<String, String>, working_directory: Option<String>) -> String {
         let mut commands = Vec::new();
         let ordered_keys = [
             "ANTHROPIC_MODEL",
@@ -168,11 +357,17 @@ impl Launcher {
             "HTTPS_PROXY",
         ];
 
+        // Add cd command if working directory specified
+        if let Some(dir) = working_directory {
+            let escaped_dir = Self::escape_ps_single_quotes(&dir);
+            commands.push(format!("Set-Location -LiteralPath '{}'", escaped_dir));
+        }
+
         for key in ordered_keys.iter() {
             if let Some(value) = config.get(*key) {
                 if !value.is_empty() {
-                    let escaped_value = value.replace("\"", "\\\"");
-                    commands.push(format!("$env:{}=\"{}\"", key, escaped_value));
+                    let escaped_value = Self::escape_ps_single_quotes(value);
+                    commands.push(format!("$env:{}='{}'", key, escaped_value));
                 }
             }
         }
@@ -188,6 +383,10 @@ impl Launcher {
 
     // Windows: CMD command
     pub fn generate_cmd_command(config: &HashMap<String, String>) -> String {
+        Self::generate_cmd_command_with_dir(config, None)
+    }
+
+    pub fn generate_cmd_command_with_dir(config: &HashMap<String, String>, working_directory: Option<String>) -> String {
         let mut commands = Vec::new();
         let ordered_keys = [
             "ANTHROPIC_MODEL",
@@ -196,6 +395,11 @@ impl Launcher {
             "HTTP_PROXY",
             "HTTPS_PROXY",
         ];
+
+        // Add cd command if working directory specified
+        if let Some(dir) = working_directory {
+            commands.push(format!("cd /d \"{}\"", dir));
+        }
 
         for key in ordered_keys.iter() {
             if let Some(value) = config.get(*key) {
@@ -221,6 +425,10 @@ impl Launcher {
 
     // macOS/Linux: Bash command
     pub fn generate_bash_command(config: &HashMap<String, String>) -> String {
+        Self::generate_bash_command_with_dir(config, None)
+    }
+
+    pub fn generate_bash_command_with_dir(config: &HashMap<String, String>, working_directory: Option<String>) -> String {
         let mut commands = Vec::new();
         let ordered_keys = [
             "ANTHROPIC_MODEL",
@@ -229,6 +437,11 @@ impl Launcher {
             "HTTP_PROXY",
             "HTTPS_PROXY",
         ];
+
+        // Add cd command if working directory specified
+        if let Some(dir) = working_directory {
+            commands.push(format!("cd \"{}\"", dir));
+        }
 
         for key in ordered_keys.iter() {
             if let Some(value) = config.get(*key) {

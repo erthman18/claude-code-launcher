@@ -1,8 +1,8 @@
 # API 参考文档
 
 > **Tauri Commands API 完整参考**
-> **最后更新**: 2026-01-30
-> **API 数量**: 27 个 Tauri Commands
+> **最后更新**: 2026-02-03
+> **API 数量**: 34 个 Tauri Commands
 
 ---
 
@@ -14,15 +14,17 @@
 - [4. 启动器 API](#4-启动器-api)
 - [5. 设置管理 API](#5-设置管理-api)
 - [6. 应用配置 API](#6-应用配置-api)
-- [7. 数据类型](#7-数据类型)
-- [8. 错误处理](#8-错误处理)
-- [9. 使用示例](#9-使用示例)
+- [7. 项目管理 API](#7-项目管理-api)
+- [8. 数据类型](#8-数据类型)
+- [9. 错误处理](#9-错误处理)
+- [10. 使用示例](#10-使用示例)
+- [11. 总结](#11-总结)
 
 ---
 
 ## 1. API 概览
 
-### 1.1 所有可用 Commands (27 个)
+### 1.1 所有可用 Commands (34 个)
 
 | 分类 | Command 名称 | 说明 |
 |------|--------------|------|
@@ -44,11 +46,22 @@
 | | `generate_cmd_command` | 生成 CMD 命令 |
 | | `generate_bash_command` | 生成 Bash 命令 |
 | **平台检测** | `get_platform` | 获取当前操作系统平台 |
+| | `get_home_directory` | 获取用户主目录 |
 | **设置管理** | `save_to_settings` | 保存配置到 Claude 设置 |
 | | `reset_settings` | 重置 Claude 设置 |
 | | `open_settings_file` | 打开设置文件 |
 | **应用配置** | `save_app_config` | 保存应用配置 |
 | | `load_app_config` | 加载应用配置 |
+| **项目管理** | `get_projects` | 获取所有项目列表 |
+| | `get_project` | 获取单个项目详情 |
+| | `create_project` | 创建新项目 |
+| | `update_project` | 更新项目配置 |
+| | `delete_project` | 删除项目 |
+| | `launch_project` | 启动指定项目 |
+| | `select_directory` | 选择目录对话框 |
+| | `generate_project_powershell_command` | 生成项目的 PowerShell 命令 |
+| | `generate_project_cmd_command` | 生成项目的 CMD 命令 |
+| | `generate_project_bash_command` | 生成项目的 Bash 命令 |
 
 ### 1.2 调用方式
 
@@ -1090,9 +1103,294 @@ try {
 
 ---
 
-## 7. 数据类型
+## 7. 项目管理 API
 
-### 7.1 DependencyStatus
+### 7.1 get_projects
+
+**说明**: 获取所有项目列表
+
+**前端调用**:
+```typescript
+const projects = await invoke<Project[]>('get_projects');
+```
+
+**参数**: 无
+
+**返回值**: `Promise<Project[]>`
+
+**返回示例**:
+```json
+[
+  {
+    "id": "abc123-def456",
+    "name": "默认项目",
+    "working_directory": "C:\\Users\\username",
+    "config": {
+      "mode": "claude",
+      "proxy": "",
+      "model": "",
+      "base_url": "",
+      "token": "",
+      "skip_permissions": true
+    },
+    "is_default": true,
+    "created_at": 1706918400,
+    "updated_at": 1706918400,
+    "last_launched_at": null
+  }
+]
+```
+
+---
+
+### 7.2 get_project
+
+**说明**: 获取单个项目详情
+
+**前端调用**:
+```typescript
+const project = await invoke<Project>('get_project', { id: 'project-id' });
+```
+
+**参数**:
+
+| 参数名 | 类型 | 必需 | 说明 |
+|--------|------|------|------|
+| `id` | `string` | 是 | 项目 ID |
+
+**返回值**: `Promise<Project>`
+
+**错误情况**:
+- `"项目不存在: <id>"`: 指定 ID 的项目不存在
+
+---
+
+### 7.3 create_project
+
+**说明**: 创建新项目
+
+**前端调用**:
+```typescript
+const project = await invoke<Project>('create_project', {
+  name: '我的项目',
+  working_directory: 'D:\\projects\\my-app',
+  config: {
+    mode: 'custom',
+    proxy: '',
+    model: 'qwen3-coder-480b-a35b',
+    base_url: 'http://api.example.com',
+    token: 'my-token',
+    skip_permissions: true
+  }
+});
+```
+
+**参数**:
+
+| 参数名 | 类型 | 必需 | 说明 |
+|--------|------|------|------|
+| `name` | `string` | 是 | 项目名称 |
+| `working_directory` | `string` | 是 | 工作目录路径 |
+| `config` | `ProjectConfig` | 是 | 项目配置 |
+
+**返回值**: `Promise<Project>`
+
+**注意事项**:
+- 新创建的项目 `is_default` 为 `false`
+- 自动生成 UUID 作为项目 ID
+- 自动记录创建和更新时间戳
+
+---
+
+### 7.4 update_project
+
+**说明**: 更新项目配置
+
+**前端调用**:
+```typescript
+const project = await invoke<Project>('update_project', {
+  id: 'project-id',
+  name: '新名称',  // 可选
+  working_directory: 'D:\\new\\path',  // 可选
+  config: { /* ... */ }  // 可选
+});
+```
+
+**参数**:
+
+| 参数名 | 类型 | 必需 | 说明 |
+|--------|------|------|------|
+| `id` | `string` | 是 | 项目 ID |
+| `name` | `string` | 否 | 新项目名称 |
+| `working_directory` | `string` | 否 | 新工作目录 |
+| `config` | `ProjectConfig` | 否 | 新配置 |
+
+**返回值**: `Promise<Project>`
+
+**注意事项**:
+- 只更新提供的字段
+- 自动更新 `updated_at` 时间戳
+
+---
+
+### 7.5 delete_project
+
+**说明**: 删除项目
+
+**前端调用**:
+```typescript
+await invoke('delete_project', { id: 'project-id' });
+```
+
+**参数**:
+
+| 参数名 | 类型 | 必需 | 说明 |
+|--------|------|------|------|
+| `id` | `string` | 是 | 项目 ID |
+
+**返回值**: `Promise<void>`
+
+**错误情况**:
+- `"项目不存在: <id>"`: 指定 ID 的项目不存在
+- `"不能删除默认项目"`: 尝试删除默认项目
+
+---
+
+### 7.6 launch_project
+
+**说明**: 启动指定项目
+
+**前端调用**:
+```typescript
+await invoke('launch_project', { id: 'project-id' });
+```
+
+**参数**:
+
+| 参数名 | 类型 | 必需 | 说明 |
+|--------|------|------|------|
+| `id` | `string` | 是 | 项目 ID |
+
+**返回值**: `Promise<void>`
+
+**启动流程**:
+1. 获取项目配置
+2. 根据模式构建环境变量
+3. 使用项目的工作目录启动 Claude Code
+4. 更新 `last_launched_at` 时间戳
+
+---
+
+### 7.7 select_directory
+
+**说明**: 打开目录选择对话框
+
+**前端调用**:
+```typescript
+const path = await invoke<string | null>('select_directory');
+```
+
+**参数**: 无
+
+**返回值**: `Promise<string | null>`
+
+**返回说明**:
+- 用户选择目录后返回路径字符串
+- 用户取消选择返回 `null`
+
+**注意事项**:
+- 使用 `tauri-plugin-dialog` 实现
+- 对话框标题为 "选择项目目录"
+
+---
+
+### 7.8 generate_project_powershell_command
+
+**说明**: 生成指定项目的 PowerShell 启动命令
+
+**前端调用**:
+```typescript
+const command = await invoke<string>('generate_project_powershell_command', { id: 'project-id' });
+```
+
+**参数**:
+
+| 参数名 | 类型 | 必需 | 说明 |
+|--------|------|------|------|
+| `id` | `string` | 是 | 项目 ID |
+
+**返回值**: `Promise<string>`
+
+**返回示例**:
+```powershell
+Set-Location -LiteralPath 'D:\projects\my-app';$env:ANTHROPIC_MODEL='qwen3';claude --dangerously-skip-permissions
+```
+
+---
+
+### 7.9 generate_project_cmd_command
+
+**说明**: 生成指定项目的 CMD 启动命令
+
+**前端调用**:
+```typescript
+const command = await invoke<string>('generate_project_cmd_command', { id: 'project-id' });
+```
+
+**参数**:
+
+| 参数名 | 类型 | 必需 | 说明 |
+|--------|------|------|------|
+| `id` | `string` | 是 | 项目 ID |
+
+**返回值**: `Promise<string>`
+
+---
+
+### 7.10 generate_project_bash_command
+
+**说明**: 生成指定项目的 Bash 启动命令
+
+**前端调用**:
+```typescript
+const command = await invoke<string>('generate_project_bash_command', { id: 'project-id' });
+```
+
+**参数**:
+
+| 参数名 | 类型 | 必需 | 说明 |
+|--------|------|------|------|
+| `id` | `string` | 是 | 项目 ID |
+
+**返回值**: `Promise<string>`
+
+---
+
+### 7.11 get_home_directory
+
+**说明**: 获取用户主目录路径
+
+**前端调用**:
+```typescript
+const homeDir = await invoke<string>('get_home_directory');
+```
+
+**参数**: 无
+
+**返回值**: `Promise<string>`
+
+**返回示例**:
+- Windows: `"C:\\Users\\username"`
+- macOS: `"/Users/username"`
+
+**错误情况**:
+- `"无法获取用户主目录"`: 系统无法确定主目录
+
+---
+
+## 8. 数据类型
+
+### 8.1 DependencyStatus
 
 **说明**: 依赖检测状态
 
@@ -1119,7 +1417,7 @@ interface DependencyStatus {
 
 ---
 
-### 7.2 AppConfig
+### 8.2 AppConfig
 
 **说明**: 应用配置对象
 
@@ -1174,9 +1472,75 @@ interface AppConfig {
 
 ---
 
-## 8. 错误处理
+### 8.3 Project
 
-### 8.1 错误类型
+**说明**: 项目数据结构
+
+```typescript
+interface Project {
+  id: string;                      // 项目 UUID
+  name: string;                    // 项目名称
+  working_directory: string;       // 工作目录路径
+  config: ProjectConfig;           // 项目配置
+  is_default: boolean;             // 是否为默认项目
+  created_at: number;              // 创建时间 (Unix 时间戳)
+  updated_at: number;              // 更新时间 (Unix 时间戳)
+  last_launched_at: number | null; // 最后启动时间
+}
+```
+
+**字段说明**:
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | `string` | 自动生成的 UUID |
+| `name` | `string` | 项目显示名称 |
+| `working_directory` | `string` | Claude Code 启动时的工作目录 |
+| `config` | `ProjectConfig` | 项目的环境配置 |
+| `is_default` | `boolean` | 是否为默认项目（不可删除） |
+| `created_at` | `number` | Unix 时间戳 |
+| `updated_at` | `number` | Unix 时间戳 |
+| `last_launched_at` | `number \| null` | 最后一次启动的时间戳 |
+
+---
+
+### 8.4 ProjectConfig
+
+**说明**: 项目配置结构
+
+```typescript
+interface ProjectConfig {
+  mode: 'claude' | 'custom';  // 工作模式
+  proxy: string;              // 代理地址 (Claude 模式)
+  model: string;              // 模型名称 (自定义模式)
+  base_url: string;           // API Base URL (自定义模式)
+  token: string;              // 认证令牌 (自定义模式)
+  skip_permissions: boolean;  // 是否跳过权限确认
+}
+```
+
+**与 AppConfig 的关系**:
+- `ProjectConfig` 结构与 `AppConfig` 相同
+- `AppConfig` 用于兼容旧的 V1 配置格式
+- `ProjectConfig` 用于 V2 多项目配置
+
+**默认值**:
+```typescript
+{
+  mode: 'claude',
+  proxy: '',
+  model: 'qwen3-coder-480b-a35b',
+  base_url: 'http://litellm.uattest.weoa.com',
+  token: '',
+  skip_permissions: true,
+}
+```
+
+---
+
+## 9. 错误处理
+
+### 9.1 错误类型
 
 所有 API 调用都返回 `Promise`，失败时会 reject 一个字符串错误消息。
 
@@ -1189,7 +1553,7 @@ Promise.resolve(result)
 Promise.reject("错误消息")
 ```
 
-### 8.2 常见错误
+### 9.2 常见错误
 
 | 错误消息 | 原因 | 解决方法 |
 |----------|------|----------|
@@ -1200,7 +1564,7 @@ Promise.reject("错误消息")
 | "设置文件不存在" | 从未保存过配置 | 先保存配置 |
 | "启动失败: ..." | 系统调用失败 | 查看详细错误信息 |
 
-### 8.3 错误处理模式
+### 9.3 错误处理模式
 
 **模式 1: try-catch**
 ```typescript
@@ -1232,9 +1596,9 @@ const config = await invoke<AppConfig>('load_app_config')
 
 ---
 
-## 9. 使用示例
+## 10. 使用示例
 
-### 9.1 完整的依赖检测流程
+### 10.1 完整的依赖检测流程
 
 ```typescript
 async function checkAndInstallDependencies() {
@@ -1301,7 +1665,7 @@ async function checkAndInstallDependencies() {
 
 ---
 
-### 9.2 启动 Claude Code 的完整流程
+### 10.2 启动 Claude Code 的完整流程
 
 ```typescript
 async function launchClaudeCode() {
@@ -1350,7 +1714,7 @@ async function launchClaudeCode() {
 
 ---
 
-### 9.3 配置管理的完整流程
+### 10.3 配置管理的完整流程
 
 ```typescript
 // 启动时加载配置
@@ -1422,7 +1786,7 @@ async function saveToClaudeSettings() {
 
 ---
 
-### 9.4 生成和复制命令
+### 10.4 生成和复制命令
 
 ```typescript
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -1486,9 +1850,9 @@ async function detectPlatformAndCopy() {
 
 ---
 
-## 10. 总结
+## 11. 总结
 
-### 10.1 API 设计特点
+### 11.1 API 设计特点
 
 - ✅ **命名清晰**: 函数名直接表达功能
 - ✅ **类型安全**: 完整的 TypeScript 类型定义
@@ -1497,19 +1861,20 @@ async function detectPlatformAndCopy() {
 - ✅ **职责单一**: 每个 API 只做一件事
 - ✅ **跨平台**: 支持 Windows 和 macOS
 
-### 10.2 API 统计
+### 11.2 API 统计
 
 | 分类 | 数量 |
 |------|------|
 | 依赖检测 | 7 |
 | 安装/更新 | 6 |
 | 启动器 | 4 |
-| 平台检测 | 1 |
+| 平台/工具 | 2 |
 | 设置管理 | 3 |
 | 应用配置 | 2 |
-| **总计** | **27** |
+| 项目管理 | 10 |
+| **总计** | **34** |
 
-### 10.3 使用建议
+### 11.3 使用建议
 
 1. **依赖检测**: 应用启动时自动检测，检测失败时刷新 PATH 后重试
 2. **安装/更新**: 在新窗口执行，不阻塞主界面
@@ -1518,7 +1883,7 @@ async function detectPlatformAndCopy() {
 5. **设置管理**: 保存前确认用户意图
 6. **配置存储**: 窗口关闭时自动保存
 
-### 10.3 相关文档
+### 11.4 相关文档
 
 - [项目总览](./PROJECT_DOCUMENTATION.md)
 - [前端开发指南](./FRONTEND_GUIDE.md)

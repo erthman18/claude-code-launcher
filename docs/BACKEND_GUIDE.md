@@ -1,7 +1,7 @@
 # 后端开发指南
 
 > **技术栈**: Rust + Tauri 2 + Tokio + Windows/macOS API
-> **最后更新**: 2026-01-30
+> **最后更新**: 2026-02-03
 
 ---
 
@@ -66,7 +66,7 @@ strip = true             # 移除调试符号
 src-tauri/
 ├── src/
 │   ├── main.rs                  # 程序入口 (main 函数)
-│   ├── lib.rs                   # Tauri 应用构建 (27 个 Commands)
+│   ├── lib.rs                   # Tauri 应用构建 (34 个 Commands)
 │   ├── commands/                # Commands 层
 │   │   └── mod.rs              # 所有 Tauri Commands 定义
 │   └── services/                # 服务层 (业务逻辑)
@@ -653,48 +653,90 @@ fn open_nodejs_download_page() -> Result<(), String> {
 
 #### 3.3.1 启动 Claude Code
 
+**核心实现**:
+
 ```rust
 use std::collections::HashMap;
 use std::process::Command;
+use base64::{Engine as _, engine::general_purpose};
+
+/// 转义 PowerShell 单引号（' -> ''）
+fn escape_ps_single_quotes(value: &str) -> String {
+    value.replace('\'', "''")
+}
+
+/// 将命令编码为 UTF-16LE Base64（用于 -EncodedCommand）
+fn encode_powershell_encoded_command(command: &str) -> String {
+    let mut bytes = Vec::with_capacity(command.len() * 2);
+    for unit in command.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    general_purpose::STANDARD.encode(bytes)
+}
 
 #[cfg(windows)]
 pub fn launch_with_config(config: HashMap<String, String>) -> Result<(), String> {
-    // 1. 检查 claude 命令是否存在
-    if !is_claude_available() {
-        return Err("Claude Code 未安装或不在 PATH 中".to_string());
-    }
-
-    // 2. 获取用户主目录
-    let home_dir = dirs::home_dir()
-        .ok_or("无法获取用户主目录".to_string())?;
-
-    // 3. 构建 PowerShell 脚本
-    let mut env_vars = Vec::new();
-    for (key, value) in config {
-        // 转义特殊字符
-        let escaped_value = value.replace("\"", "`\"");
-        env_vars.push(format!("$env:{}=\"{}\"", key, escaped_value));
-    }
-
-    let env_script = env_vars.join("; ");
-    let script = format!("& {{ {}; claude }}", env_script);
-
-    // 4. 在新控制台窗口启动
     use std::os::windows::process::CommandExt;
-    use windows::Win32::System::Threading::CREATE_NEW_CONSOLE;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    Command::new("powershell")
-        .args([
-            "-NoExit",           // 保持窗口打开
-            "-NoProfile",
-            "-Command", &script,
+    // 1. 刷新系统 PATH（GUI 应用可能有陈旧的 PATH）
+    super::dependency_checker::DependencyChecker::refresh_system_path();
+
+    // 2. 检查 claude 命令是否存在
+    // ... 省略检测逻辑 ...
+
+    // 3. 构建 PowerShell 命令（使用单引号避免转义问题）
+    let mut commands = Vec::new();
+    for (key, value) in config {
+        let escaped_value = escape_ps_single_quotes(&value);
+        commands.push(format!("$env:{}='{}'", key, escaped_value));
+    }
+    commands.push("claude".to_string());
+    let full_command = commands.join("; ");
+
+    // 4. 编码为 Base64（完全避免命令行参数解析问题）
+    let encoded = encode_powershell_encoded_command(&full_command);
+
+    // 5. 使用 cmd.exe /c start 创建真正的交互式控制台
+    // 关键：GUI 应用直接启动 PowerShell 可能导致无 TTY
+    Command::new("cmd.exe")
+        .current_dir(&work_dir)
+        .args(&[
+            "/c", "start",
+            "Claude Code",           // 窗口标题
+            "powershell.exe",
+            "-NoExit", "-NoLogo", "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-EncodedCommand", &encoded,
         ])
-        .current_dir(home_dir)   // 在主目录启动
-        .creation_flags(CREATE_NEW_CONSOLE.0)
+        .creation_flags(CREATE_NO_WINDOW)  // 隐藏中间的 cmd 窗口
         .spawn()
         .map_err(|e| format!("启动失败: {}", e))?;
 
     Ok(())
+}
+```
+
+**日志功能**:
+
+启动器包含完整的日志记录功能，便于调试启动问题：
+
+```rust
+// 日志目录：%LOCALAPPDATA%\ClaudeCodeLauncher\logs\
+fn launcher_log_path() -> PathBuf {
+    let base = dirs::data_local_dir().unwrap_or_else(std::env::temp_dir);
+    base.join("ClaudeCodeLauncher").join("logs").join("launcher.log")
+}
+
+// 日志文件：
+// - launcher.log: 启动器操作日志（含敏感信息脱敏）
+// - powershell-transcript.log: PowerShell 会话记录
+// - claude-run.log: Claude 运行日志
+
+// 敏感信息脱敏
+fn sanitize_command_for_log(command: &str) -> String {
+    // 将 $env:ANTHROPIC_AUTH_TOKEN='secret' 替换为 $env:ANTHROPIC_AUTH_TOKEN='<redacted>'
+    // ...
 }
 ```
 
@@ -951,35 +993,55 @@ pub fn open_settings_file() -> Result<(), String> {
 
 #### 3.5.1 数据结构
 
+**V2 配置格式（多项目支持）**:
+
 ```rust
 use serde::{Deserialize, Serialize};
 
-fn default_skip_permissions() -> bool {
-    true
+/// V2 config format with multi-project support
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppConfigV2 {
+    pub version: u32,           // 配置版本号（2）
+    pub projects: Vec<Project>, // 项目列表
 }
 
+/// 项目数据结构
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Project {
+    pub id: String,                      // 项目 UUID
+    pub name: String,                    // 项目名称
+    pub working_directory: String,       // 工作目录
+    pub config: ProjectConfig,           // 项目配置
+    pub is_default: bool,                // 是否为默认项目
+    pub created_at: u64,                 // 创建时间戳
+    pub updated_at: u64,                 // 更新时间戳
+    pub last_launched_at: Option<u64>,   // 最后启动时间
+}
+
+/// 项目配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectConfig {
+    pub mode: String,           // "claude" | "custom"
+    pub proxy: String,          // 代理地址
+    pub model: String,          // 模型名称
+    pub base_url: String,       // API Base URL
+    pub token: String,          // 认证令牌（Base64 编码存储）
+    pub skip_permissions: bool, // 跳过权限确认
+}
+```
+
+**V1 配置格式（兼容旧版）**:
+
+```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
-    pub mode: String,       // "claude" | "custom"
+    pub mode: String,
     pub proxy: String,
     pub model: String,
     pub base_url: String,
     pub token: String,
     #[serde(default = "default_skip_permissions")]
-    pub skip_permissions: bool,  // 是否跳过权限确认
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            mode: "claude".to_string(),
-            proxy: String::new(),
-            model: "qwen3-coder-480b-a35b".to_string(),
-            base_url: "http://litellm.uattest.weoa.com".to_string(),
-            token: String::new(),
-            skip_permissions: true,  // 默认启用
-        }
-    }
+    pub skip_permissions: bool,
 }
 ```
 
@@ -994,7 +1056,7 @@ impl Default for AppConfig {
 | `token` | `String` | `""` | 认证令牌 |
 | `skip_permissions` | `bool` | `true` | 跳过权限确认 |
 
-**`#[serde(default = "...")]`**: 当 JSON 中缺少该字段时使用默认值，保持向后兼容
+**配置版本迁移**: 系统自动检测配置版本，如果是 V1 格式会自动迁移到 V2 格式
 
 #### 3.5.2 配置文件路径
 
@@ -1273,6 +1335,59 @@ pub fn save_app_config(config: config_storage::AppConfig) -> Result<(), String> 
 pub fn load_app_config() -> Result<config_storage::AppConfig, String> {
     config_storage::load_config()
 }
+
+// ============ 项目管理 Commands ============
+
+#[tauri::command]
+pub fn get_projects() -> Result<Vec<Project>, String> {
+    ConfigStorage::get_projects()
+}
+
+#[tauri::command]
+pub fn get_project(id: String) -> Result<Project, String> {
+    ConfigStorage::get_project(&id)
+}
+
+#[tauri::command]
+pub fn create_project(name: String, working_directory: String, config: ProjectConfig) -> Result<Project, String> {
+    let input = CreateProjectInput { name, working_directory, config };
+    ConfigStorage::create_project(input)
+}
+
+#[tauri::command]
+pub fn update_project(id: String, name: Option<String>, working_directory: Option<String>, config: Option<ProjectConfig>) -> Result<Project, String> {
+    let updates = UpdateProjectInput { name, working_directory, config };
+    ConfigStorage::update_project(&id, updates)
+}
+
+#[tauri::command]
+pub fn delete_project(id: String) -> Result<(), String> {
+    ConfigStorage::delete_project(&id)
+}
+
+#[tauri::command]
+pub fn launch_project(id: String) -> Result<(), String> {
+    // 获取项目配置并启动
+    let project = ConfigStorage::get_project(&id)?;
+    let config = build_config_map(&project);
+    Launcher::launch_with_config_and_dir(config, Some(project.working_directory))?;
+    ConfigStorage::update_project_launched(&id)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn select_directory(app_handle: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let result = app_handle.dialog().file().set_title("选择项目目录").blocking_pick_folder();
+    Ok(result.map(|p| p.to_string()))
+}
+
+#[tauri::command]
+pub fn get_home_directory() -> Result<String, String> {
+    dirs::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .ok_or_else(|| "无法获取用户主目录".to_string())
+}
 ```
 
 ### 4.2 注册 Commands (lib.rs)
@@ -1282,24 +1397,49 @@ pub fn load_app_config() -> Result<config_storage::AppConfig, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())  // 目录选择对话框
         .invoke_handler(tauri::generate_handler![
+            // 依赖检测
             commands::check_nodejs,
             commands::check_claude,
+            commands::check_gitbash,
             commands::check_nodejs_with_update,
             commands::check_claude_with_update,
+            commands::check_gitbash_with_update,
             commands::refresh_system_path,
+            // 安装/更新
             commands::install_nodejs,
             commands::update_nodejs,
             commands::install_claude,
             commands::update_claude,
+            commands::install_gitbash,
+            commands::update_gitbash,
+            // 启动器
             commands::launch_claude_code,
             commands::generate_powershell_command,
             commands::generate_cmd_command,
+            commands::generate_bash_command,
+            // 平台/工具
+            commands::get_platform,
+            commands::get_home_directory,
+            // 设置管理
             commands::save_to_settings,
             commands::reset_settings,
             commands::open_settings_file,
+            // 应用配置
             commands::save_app_config,
             commands::load_app_config,
+            // 项目管理
+            commands::get_projects,
+            commands::get_project,
+            commands::create_project,
+            commands::update_project,
+            commands::delete_project,
+            commands::launch_project,
+            commands::select_directory,
+            commands::generate_project_powershell_command,
+            commands::generate_project_cmd_command,
+            commands::generate_project_bash_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -1757,10 +1897,11 @@ cargo test
 | 依赖检测 | 7 |
 | 安装/更新 | 6 |
 | 启动器 | 4 |
-| 平台检测 | 1 |
+| 平台/工具 | 2 |
 | 设置管理 | 3 |
 | 应用配置 | 2 |
-| **总计** | **27** |
+| 项目管理 | 10 |
+| **总计** | **34** |
 
 ### 8.4 后续优化方向
 
