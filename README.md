@@ -38,6 +38,7 @@
 - **前端**：React 19 + TypeScript + Tailwind CSS
 - **后端**：Rust + Tauri 2
 - **拖拽库**：@dnd-kit
+- **剪贴板**：@tauri-apps/plugin-clipboard-manager (macOS 必需)
 
 ## 开发
 
@@ -72,6 +73,22 @@ npm run tauri:build
 - Windows: `%APPDATA%\ClaudeCodeLauncher\config.json`
 - macOS: `~/Library/Application Support/ClaudeCodeLauncher/config.json`
 - Linux: `~/.config/ClaudeCodeLauncher/config.json`
+
+## 平台支持
+
+| 功能 | Windows | macOS |
+|------|---------|-------|
+| 依赖检测 | ✅ | ✅ (扩展 PATH) |
+| 启动 Claude | ✅ PowerShell | ✅ Terminal.app |
+| 复制命令 | ✅ | ✅ (Tauri 剪贴板 API) |
+| 安装/更新 | ✅ winget | ✅ brew/npm |
+
+### macOS 特殊处理
+
+macOS GUI 应用不继承 shell 的 PATH 环境变量，因此：
+- **依赖检测**：自动扫描常见安装路径（Homebrew、nvm、pnpm、Volta 等）
+- **启动功能**：通过 Terminal.app 启动，Terminal 会加载完整 PATH
+- **剪贴板**：使用 Tauri 剪贴板插件，而非浏览器 API
 
 ## 许可证
 

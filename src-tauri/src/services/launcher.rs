@@ -90,8 +90,8 @@ impl Launcher {
         Self::launch_with_temp_env(config, None)
     }
 
-    pub fn launch_with_config_and_dir(config: HashMap<String, String>, working_directory: Option<String>) -> Result<(), String> {
-        Self::launch_with_temp_env(config, working_directory)
+    pub fn launch_with_config_and_dir(config: HashMap<String, String>, working_dir: Option<String>) -> Result<(), String> {
+        Self::launch_with_temp_env(config, working_dir)
     }
 
     pub fn launch_simple() -> Result<(), String> {
@@ -109,7 +109,7 @@ impl Launcher {
         }
     }
 
-    fn launch_with_temp_env(config: HashMap<String, String>, working_directory: Option<String>) -> Result<(), String> {
+    fn launch_with_temp_env(config: HashMap<String, String>, working_dir: Option<String>) -> Result<(), String> {
         let ordered_keys = [
             "ANTHROPIC_MODEL",
             "ANTHROPIC_BASE_URL",
@@ -138,7 +138,7 @@ impl Launcher {
             }
             commands.push(claude_cmd.to_string());
             let full_command = commands.join("; ");
-            Self::execute_windows(&full_command, working_directory)
+            Self::execute_windows(&full_command, working_dir)
         }
 
         #[cfg(target_os = "macos")]
@@ -154,7 +154,7 @@ impl Launcher {
             }
             env_exports.push(claude_cmd.to_string());
             let full_command = env_exports.join(" && ");
-            Self::execute_macos(&full_command, working_directory)
+            Self::execute_macos(&full_command, working_dir)
         }
 
         #[cfg(all(not(windows), not(target_os = "macos")))]
@@ -164,17 +164,16 @@ impl Launcher {
     }
 
     #[cfg(windows)]
-    fn execute_windows(command: &str, working_directory: Option<String>) -> Result<(), String> {
+    fn execute_windows(command: &str, working_dir: Option<String>) -> Result<(), String> {
         use std::os::windows::process::CommandExt;
-        const CREATE_NEW_CONSOLE: u32 = 0x00000010;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
 
         Self::log_line("=== launch start ===");
         Self::log_line(&format!("raw command: {}", Self::sanitize_command_for_log(command)));
-        if let Some(ref wd) = working_directory {
-            Self::log_line(&format!("working_directory arg: {}", wd));
+        if let Some(ref wd) = working_dir {
+            Self::log_line(&format!("working_dir arg: {}", wd));
         } else {
-            Self::log_line("working_directory arg: <none>");
+            Self::log_line("working_dir arg: <none>");
         }
 
         // GUI apps can have a stale PATH after installs; refresh from registry so `claude` is discoverable.
@@ -215,7 +214,7 @@ impl Launcher {
         }
 
         // Determine the working directory
-        let work_dir: PathBuf = if let Some(ref dir) = working_directory {
+        let work_dir: PathBuf = if let Some(ref dir) = working_dir {
             let path = PathBuf::from(dir);
             if path.exists() && path.is_dir() {
                 path
@@ -299,38 +298,27 @@ impl Launcher {
     }
 
     #[cfg(target_os = "macos")]
-    fn execute_macos(command: &str, working_directory: Option<String>) -> Result<(), String> {
-        // Check if claude command exists
-        let check = Command::new("which")
-            .arg("claude")
-            .output()
-            .map_err(|e| format!("无法检查Claude命令: {}", e))?;
+    fn execute_macos(command: &str, working_dir: Option<String>) -> Result<(), String> {
+        // Note: We don't check for claude existence here because:
+        // 1. Terminal.app will launch with a login shell that loads .zshrc/.bash_profile
+        // 2. This means PATH will include npm global bin, homebrew, nvm, etc.
+        // 3. The GUI app doesn't have this PATH, so `which claude` would fail even when claude is installed
+        // 4. If claude is not installed, the user will see the error directly in Terminal
 
-        if !check.status.success() || check.stdout.is_empty() {
-            return Err("Claude Code未安装或未在PATH中。请先安装Claude Code。".to_string());
-        }
-
-        // Determine the working directory
-        let work_dir: PathBuf = if let Some(ref dir) = working_directory {
-            let path = PathBuf::from(dir);
-            if path.exists() && path.is_dir() {
-                path
-            } else {
-                return Err(format!("工作目录不存在: {}", dir));
-            }
-        } else {
+        let target_dir = working_dir.unwrap_or_else(|| {
             dirs::home_dir()
-                .ok_or("无法获取用户主目录".to_string())?
-        };
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "~".to_string())
+        });
 
         // Use osascript to open Terminal.app with the command
+        // Terminal.app runs as a login shell by default, so PATH will be correct
         let script = format!(
             r#"tell application "Terminal"
                 activate
-                do script "cd \"{}\" && echo 'Starting Claude Code in: {}' && {}"
+                do script "cd '{}' && echo 'Starting Claude Code...' && {}"
             end tell"#,
-            work_dir.display(),
-            work_dir.display(),
+            target_dir.replace("'", "'\\''"),
             command.replace("\"", "\\\"")
         );
 
@@ -347,7 +335,7 @@ impl Launcher {
         Self::generate_powershell_command_with_dir(config, None)
     }
 
-    pub fn generate_powershell_command_with_dir(config: &HashMap<String, String>, working_directory: Option<String>) -> String {
+    pub fn generate_powershell_command_with_dir(config: &HashMap<String, String>, working_dir: Option<String>) -> String {
         let mut commands = Vec::new();
         let ordered_keys = [
             "ANTHROPIC_MODEL",
@@ -358,7 +346,7 @@ impl Launcher {
         ];
 
         // Add cd command if working directory specified
-        if let Some(dir) = working_directory {
+        if let Some(dir) = working_dir {
             let escaped_dir = Self::escape_ps_single_quotes(&dir);
             commands.push(format!("Set-Location -LiteralPath '{}'", escaped_dir));
         }
@@ -378,7 +366,7 @@ impl Launcher {
             "claude".to_string()
         };
         commands.push(claude_cmd);
-        commands.join(";")
+        commands.join("; ")
     }
 
     // Windows: CMD command
@@ -386,7 +374,7 @@ impl Launcher {
         Self::generate_cmd_command_with_dir(config, None)
     }
 
-    pub fn generate_cmd_command_with_dir(config: &HashMap<String, String>, working_directory: Option<String>) -> String {
+    pub fn generate_cmd_command_with_dir(config: &HashMap<String, String>, working_dir: Option<String>) -> String {
         let mut commands = Vec::new();
         let ordered_keys = [
             "ANTHROPIC_MODEL",
@@ -397,7 +385,7 @@ impl Launcher {
         ];
 
         // Add cd command if working directory specified
-        if let Some(dir) = working_directory {
+        if let Some(dir) = working_dir {
             commands.push(format!("cd /d \"{}\"", dir));
         }
 
@@ -428,7 +416,7 @@ impl Launcher {
         Self::generate_bash_command_with_dir(config, None)
     }
 
-    pub fn generate_bash_command_with_dir(config: &HashMap<String, String>, working_directory: Option<String>) -> String {
+    pub fn generate_bash_command_with_dir(config: &HashMap<String, String>, working_dir: Option<String>) -> String {
         let mut commands = Vec::new();
         let ordered_keys = [
             "ANTHROPIC_MODEL",
@@ -439,8 +427,8 @@ impl Launcher {
         ];
 
         // Add cd command if working directory specified
-        if let Some(dir) = working_directory {
-            commands.push(format!("cd \"{}\"", dir));
+        if let Some(dir) = working_dir {
+            commands.push(format!("cd '{}'", dir.replace("'", "'\\''")));
         }
 
         for key in ordered_keys.iter() {

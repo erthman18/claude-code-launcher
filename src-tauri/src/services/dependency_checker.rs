@@ -2,6 +2,62 @@ use serde::{Deserialize, Serialize};
 use std::process::Command;
 use regex::Regex;
 
+#[cfg(target_os = "macos")]
+use std::env;
+
+/// Get extended PATH for macOS that includes common installation locations
+/// This is needed because GUI apps don't inherit shell PATH from .zshrc/.bash_profile
+#[cfg(target_os = "macos")]
+fn get_macos_extended_path() -> String {
+    let home = dirs::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "".to_string());
+
+    let mut extra_paths: Vec<String> = vec![
+        "/usr/local/bin".to_string(),
+        "/opt/homebrew/bin".to_string(),
+        "/opt/homebrew/sbin".to_string(),
+    ];
+
+    if !home.is_empty() {
+        extra_paths.push(format!("{}/.npm-global/bin", home));
+        extra_paths.push(format!("{}/Library/pnpm", home));
+        extra_paths.push(format!("{}/.local/bin", home));
+
+        // Check for nvm installations - expand glob pattern manually
+        let nvm_base = format!("{}/.nvm/versions/node", home);
+        if let Ok(entries) = std::fs::read_dir(&nvm_base) {
+            for entry in entries.flatten() {
+                let bin_path = entry.path().join("bin");
+                if bin_path.exists() {
+                    extra_paths.push(bin_path.to_string_lossy().to_string());
+                }
+            }
+        }
+
+        // Check for fnm installations
+        let fnm_base = format!("{}/Library/Application Support/fnm/node-versions", home);
+        if let Ok(entries) = std::fs::read_dir(&fnm_base) {
+            for entry in entries.flatten() {
+                let bin_path = entry.path().join("installation/bin");
+                if bin_path.exists() {
+                    extra_paths.push(bin_path.to_string_lossy().to_string());
+                }
+            }
+        }
+
+        // Check for volta installations
+        extra_paths.push(format!("{}/.volta/bin", home));
+    }
+
+    // Get current PATH and combine
+    let current_path = env::var("PATH").unwrap_or_default();
+    let mut all_paths: Vec<&str> = extra_paths.iter().map(|s| s.as_str()).collect();
+    all_paths.extend(current_path.split(':'));
+
+    all_paths.join(":")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DependencyStatus {
     pub installed: bool,
@@ -16,6 +72,56 @@ pub struct DependencyChecker;
 
 impl DependencyChecker {
     pub fn check_nodejs() -> DependencyStatus {
+        #[cfg(target_os = "macos")]
+        {
+            // On macOS, use extended PATH to find node
+            let extended_path = get_macos_extended_path();
+            let output = Command::new("sh")
+                .args(&["-c", &format!("PATH='{}' node --version", extended_path)])
+                .output();
+
+            match output {
+                Ok(out) if out.status.success() => {
+                    let stdout = String::from_utf8_lossy(&out.stdout);
+                    if let Ok(re) = Regex::new(r"v(\d+\.\d+\.\d+)") {
+                        if let Some(caps) = re.captures(&stdout) {
+                            let version = caps.get(1).map(|m| m.as_str().to_string());
+                            let meets_requirement = if let Some(ref v) = version {
+                                Self::compare_versions(v, "18.0.0")
+                            } else {
+                                false
+                            };
+                            return DependencyStatus {
+                                installed: true,
+                                version,
+                                meets_requirement,
+                                latest_version: None,
+                                update_available: false,
+                                error: None,
+                            };
+                        }
+                    }
+                    DependencyStatus {
+                        installed: true,
+                        version: None,
+                        meets_requirement: false,
+                        latest_version: None,
+                        update_available: false,
+                        error: Some("无法解析版本号".to_string()),
+                    }
+                }
+                _ => DependencyStatus {
+                    installed: false,
+                    version: None,
+                    meets_requirement: false,
+                    latest_version: None,
+                    update_available: false,
+                    error: Some("Node.js not found".to_string()),
+                },
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
         Self::check_dependency("node", &["--version"], r"v(\d+\.\d+\.\d+)", Some("18.0.0"))
     }
 
@@ -33,7 +139,16 @@ impl DependencyChecker {
             .args(&["/c", "claude", "--version"])
             .output();
 
-        #[cfg(not(windows))]
+        #[cfg(target_os = "macos")]
+        let output = {
+            // On macOS, use extended PATH to find claude
+            let extended_path = get_macos_extended_path();
+            Command::new("sh")
+                .args(&["-c", &format!("PATH='{}' claude --version", extended_path)])
+                .output()
+        };
+
+        #[cfg(all(not(windows), not(target_os = "macos")))]
         let output = Command::new("claude")
             .arg("--version")
             .output();

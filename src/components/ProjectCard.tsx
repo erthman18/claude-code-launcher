@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import type { Project } from '../types/project';
 import { projectApi } from '../api';
 
@@ -47,7 +48,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
         command = await projectApi.generateBashCommand(project.id);
       }
 
-      await navigator.clipboard.writeText(command);
+      await writeText(command);
 
       // Show brief success feedback
       setTimeout(() => setCopying(null), 1000);
