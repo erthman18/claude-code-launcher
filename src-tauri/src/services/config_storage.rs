@@ -2,11 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use base64::{Engine as _, engine::general_purpose};
+use crate::models::{Project, ProjectConfig, CreateProjectInput, UpdateProjectInput, ProjectOrderItem, PinnedOrderItem};
 
 fn default_skip_permissions() -> bool {
     true
 }
 
+/// Legacy v1 config format (for migration)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub mode: String,
@@ -31,19 +33,37 @@ impl Default for AppConfig {
     }
 }
 
+/// V2 config format with multi-project support
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppConfigV2 {
+    pub version: u32,
+    pub projects: Vec<Project>,
+}
+
+impl Default for AppConfigV2 {
+    fn default() -> Self {
+        Self {
+            version: 2,
+            projects: vec![Project::default_project()],
+        }
+    }
+}
+
+/// Raw config for detecting version
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RawConfig {
+    #[serde(default)]
+    version: Option<u32>,
+}
+
 pub struct ConfigStorage;
 
 impl ConfigStorage {
     fn get_config_path() -> Result<PathBuf, String> {
-        // 跨平台配置目录:
-        // Windows: C:\Users\<user>\AppData\Roaming\ClaudeCodeLauncher
-        // macOS: ~/Library/Application Support/ClaudeCodeLauncher
-        // Linux: ~/.config/ClaudeCodeLauncher
         let config_dir = dirs::config_dir()
             .ok_or("无法获取配置目录")?
             .join("ClaudeCodeLauncher");
 
-        // 确保目录存在
         if !config_dir.exists() {
             fs::create_dir_all(&config_dir)
                 .map_err(|e| format!("无法创建配置目录: {}", e))?;
@@ -52,18 +72,111 @@ impl ConfigStorage {
         Ok(config_dir.join("config.json"))
     }
 
-    pub fn save_config(config: &AppConfig) -> Result<(), String> {
+    /// Migrate v1 config to v2 format
+    fn migrate_v1_to_v2(v1_config: AppConfig) -> AppConfigV2 {
+        let home_dir = dirs::home_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "~".to_string());
+
+        let project_config = ProjectConfig {
+            mode: v1_config.mode,
+            proxy: v1_config.proxy,
+            model: v1_config.model,
+            base_url: v1_config.base_url,
+            token: v1_config.token, // Already decoded at this point
+            skip_permissions: v1_config.skip_permissions,
+        };
+
+        let default_project = Project::new(
+            "默认项目".to_string(),
+            home_dir,
+            project_config,
+            true,
+        );
+
+        AppConfigV2 {
+            version: 2,
+            projects: vec![default_project],
+        }
+    }
+
+    /// Encode token in project config for storage
+    fn encode_project_token(project: &mut Project) {
+        if !project.config.token.is_empty() {
+            project.config.token = general_purpose::STANDARD.encode(&project.config.token);
+        }
+    }
+
+    /// Decode token in project config after loading
+    fn decode_project_token(project: &mut Project) {
+        if !project.config.token.is_empty() {
+            if let Ok(decoded) = general_purpose::STANDARD.decode(&project.config.token) {
+                if let Ok(token_str) = String::from_utf8(decoded) {
+                    project.config.token = token_str;
+                }
+            }
+        }
+    }
+
+    /// Load v2 config, migrating from v1 if necessary
+    pub fn load_config_v2() -> Result<AppConfigV2, String> {
         let config_path = Self::get_config_path()?;
 
-        // 创建副本用于保存
-        let mut config_to_save = config.clone();
-
-        // Token Base64编码(简单混淆)
-        if !config_to_save.token.is_empty() {
-            config_to_save.token = general_purpose::STANDARD.encode(&config_to_save.token);
+        if !config_path.exists() {
+            return Ok(AppConfigV2::default());
         }
 
-        // 写入JSON文件
+        let content = fs::read_to_string(&config_path)
+            .map_err(|e| format!("无法读取配置文件: {}", e))?;
+
+        // Detect version
+        let raw: RawConfig = serde_json::from_str(&content)
+            .map_err(|e| format!("无法解析配置文件: {}", e))?;
+
+        if raw.version == Some(2) {
+            // Load v2 config directly
+            let mut config: AppConfigV2 = serde_json::from_str(&content)
+                .map_err(|e| format!("无法解析v2配置: {}", e))?;
+
+            // Decode tokens
+            for project in &mut config.projects {
+                Self::decode_project_token(project);
+            }
+
+            Ok(config)
+        } else {
+            // Migrate from v1
+            let mut v1_config: AppConfig = serde_json::from_str(&content)
+                .map_err(|e| format!("无法解析v1配置: {}", e))?;
+
+            // Decode v1 token
+            if !v1_config.token.is_empty() {
+                if let Ok(decoded) = general_purpose::STANDARD.decode(&v1_config.token) {
+                    if let Ok(token_str) = String::from_utf8(decoded) {
+                        v1_config.token = token_str;
+                    }
+                }
+            }
+
+            let config = Self::migrate_v1_to_v2(v1_config);
+
+            // Save migrated config
+            Self::save_config_v2(&config)?;
+
+            Ok(config)
+        }
+    }
+
+    /// Save v2 config
+    pub fn save_config_v2(config: &AppConfigV2) -> Result<(), String> {
+        let config_path = Self::get_config_path()?;
+
+        // Create a copy with encoded tokens
+        let mut config_to_save = config.clone();
+        for project in &mut config_to_save.projects {
+            Self::encode_project_token(project);
+        }
+
         let json_string = serde_json::to_string_pretty(&config_to_save)
             .map_err(|e| format!("无法序列化配置: {}", e))?;
 
@@ -73,34 +186,225 @@ impl ConfigStorage {
         Ok(())
     }
 
-    pub fn load_config() -> Result<AppConfig, String> {
-        let config_path = Self::get_config_path()?;
+    /// Get all projects
+    pub fn get_projects() -> Result<Vec<Project>, String> {
+        let config = Self::load_config_v2()?;
+        Ok(config.projects)
+    }
 
-        if !config_path.exists() {
-            return Ok(AppConfig::default());
+    /// Get a single project by ID
+    pub fn get_project(id: &str) -> Result<Project, String> {
+        let config = Self::load_config_v2()?;
+        config.projects
+            .into_iter()
+            .find(|p| p.id == id)
+            .ok_or_else(|| format!("项目不存在: {}", id))
+    }
+
+    /// Create a new project
+    pub fn create_project(input: CreateProjectInput) -> Result<Project, String> {
+        let mut config = Self::load_config_v2()?;
+
+        // Calculate sort_order: max of non-pinned projects + 1
+        let max_order = config.projects
+            .iter()
+            .filter(|p| !p.is_pinned)
+            .map(|p| p.sort_order)
+            .max()
+            .unwrap_or(0);
+
+        let project = Project::new_with_sort_order(
+            input.name,
+            input.working_directory,
+            input.config,
+            false, // New projects are not default
+            max_order + 1,
+        );
+
+        config.projects.push(project.clone());
+        Self::save_config_v2(&config)?;
+
+        Ok(project)
+    }
+
+    /// Update an existing project
+    pub fn update_project(id: &str, updates: UpdateProjectInput) -> Result<Project, String> {
+        let mut config = Self::load_config_v2()?;
+
+        // Pre-calculate max_order in case we need it for unpinning
+        let max_order = config.projects
+            .iter()
+            .filter(|p| !p.is_pinned && p.id != id)
+            .map(|p| p.sort_order)
+            .max()
+            .unwrap_or(0);
+
+        let project = config.projects
+            .iter_mut()
+            .find(|p| p.id == id)
+            .ok_or_else(|| format!("项目不存在: {}", id))?;
+
+        if let Some(name) = updates.name {
+            project.name = name;
+        }
+        if let Some(working_directory) = updates.working_directory {
+            project.working_directory = working_directory;
+        }
+        if let Some(new_config) = updates.config {
+            project.config = new_config;
+        }
+        if let Some(is_pinned) = updates.is_pinned {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+
+            if is_pinned && !project.is_pinned {
+                // Setting pinned: record the time
+                project.is_pinned = true;
+                project.pinned_at = Some(now);
+            } else if !is_pinned && project.is_pinned {
+                // Unpinning: clear pinned_at, assign a sort_order
+                project.is_pinned = false;
+                project.pinned_at = None;
+                project.sort_order = max_order + 1;
+            }
         }
 
-        // 读取文件
-        let content = fs::read_to_string(&config_path)
-            .map_err(|e| format!("无法读取配置文件: {}", e))?;
+        project.updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
 
-        let mut config: AppConfig = serde_json::from_str(&content)
-            .map_err(|e| format!("无法解析配置文件: {}", e))?;
+        let updated_project = project.clone();
+        Self::save_config_v2(&config)?;
 
-        // Token Base64解码
-        if !config.token.is_empty() {
-            match general_purpose::STANDARD.decode(&config.token) {
-                Ok(decoded) => {
-                    if let Ok(token_str) = String::from_utf8(decoded) {
-                        config.token = token_str;
-                    }
-                }
-                Err(_) => {
-                    // 解码失败,保持原值
+        Ok(updated_project)
+    }
+
+    /// Delete a project (cannot delete default project)
+    pub fn delete_project(id: &str) -> Result<(), String> {
+        let mut config = Self::load_config_v2()?;
+
+        let project = config.projects
+            .iter()
+            .find(|p| p.id == id)
+            .ok_or_else(|| format!("项目不存在: {}", id))?;
+
+        if project.is_default {
+            return Err("不能删除默认项目".to_string());
+        }
+
+        config.projects.retain(|p| p.id != id);
+        Self::save_config_v2(&config)?;
+
+        Ok(())
+    }
+
+    /// Update project's last launched timestamp
+    pub fn update_project_launched(id: &str) -> Result<(), String> {
+        let mut config = Self::load_config_v2()?;
+
+        if let Some(project) = config.projects.iter_mut().find(|p| p.id == id) {
+            project.last_launched_at = Some(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+            );
+            Self::save_config_v2(&config)?;
+        }
+
+        Ok(())
+    }
+
+    /// Update sort order for non-pinned projects (batch)
+    pub fn update_projects_order(orders: Vec<ProjectOrderItem>) -> Result<(), String> {
+        let mut config = Self::load_config_v2()?;
+
+        for order_item in orders {
+            if let Some(project) = config.projects.iter_mut().find(|p| p.id == order_item.id) {
+                // Only update non-pinned, non-default projects
+                if !project.is_pinned && !project.is_default {
+                    project.sort_order = order_item.sort_order;
                 }
             }
         }
 
-        Ok(config)
+        Self::save_config_v2(&config)?;
+        Ok(())
+    }
+
+    /// Update pinned_at for pinned projects (batch) - used for reordering pinned items
+    pub fn update_pinned_order(orders: Vec<PinnedOrderItem>) -> Result<(), String> {
+        let mut config = Self::load_config_v2()?;
+
+        for order_item in orders {
+            if let Some(project) = config.projects.iter_mut().find(|p| p.id == order_item.id) {
+                // Only update pinned projects
+                if project.is_pinned {
+                    project.pinned_at = Some(order_item.pinned_at);
+                }
+            }
+        }
+
+        Self::save_config_v2(&config)?;
+        Ok(())
+    }
+
+    /// Toggle project pinned status
+    pub fn toggle_project_pinned(id: &str, is_pinned: bool) -> Result<Project, String> {
+        let updates = UpdateProjectInput {
+            name: None,
+            working_directory: None,
+            config: None,
+            is_pinned: Some(is_pinned),
+        };
+        Self::update_project(id, updates)
+    }
+
+    // ============ Legacy v1 API for backwards compatibility ============
+
+    pub fn save_config(config: &AppConfig) -> Result<(), String> {
+        // Convert to v2 and save
+        let mut v2_config = Self::load_config_v2().unwrap_or_default();
+
+        // Update default project with new config
+        if let Some(default_project) = v2_config.projects.iter_mut().find(|p| p.is_default) {
+            default_project.config = ProjectConfig {
+                mode: config.mode.clone(),
+                proxy: config.proxy.clone(),
+                model: config.model.clone(),
+                base_url: config.base_url.clone(),
+                token: config.token.clone(),
+                skip_permissions: config.skip_permissions,
+            };
+            default_project.updated_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+        }
+
+        Self::save_config_v2(&v2_config)
+    }
+
+    pub fn load_config() -> Result<AppConfig, String> {
+        let config = Self::load_config_v2()?;
+
+        // Return default project's config as AppConfig
+        let default_project = config.projects
+            .iter()
+            .find(|p| p.is_default)
+            .cloned()
+            .unwrap_or_else(Project::default_project);
+
+        Ok(AppConfig {
+            mode: default_project.config.mode,
+            proxy: default_project.config.proxy,
+            model: default_project.config.model,
+            base_url: default_project.config.base_url,
+            token: default_project.config.token,
+            skip_permissions: default_project.config.skip_permissions,
+        })
     }
 }

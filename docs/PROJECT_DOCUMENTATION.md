@@ -1,7 +1,7 @@
 # Claude Code Launcher Tauri - 完整技术文档
 
 > **项目版本**: 0.1.0
-> **最后更新**: 2026-01-30
+> **最后更新**: 2026-02-03
 > **技术栈**: Tauri 2 + React 19 + TypeScript + Rust + Tailwind CSS
 
 ---
@@ -32,9 +32,13 @@
 - ⚙️ **配置管理**: 图形化配置代理、自定义模型等参数
 - 🚀 **一键启动**: 简化 Claude Code 的启动流程
 - 💾 **配置持久化**: 自动保存和恢复用户配置
+- 📁 **多项目支持**: V2 配置格式支持多个独立项目配置
+- 🔀 **拖拽排序**: 通过拖拽调整项目在列表中的顺序
+- 📌 **置顶功能**: 支持将重要项目置顶显示
 - 🔧 **命令生成**: 生成 PowerShell/CMD/Bash 命令供手动执行
 - 🖥️ **跨平台支持**: 支持 Windows 和 macOS 系统
 - ⚡ **跳过权限确认**: 支持 `--dangerously-skip-permissions` 模式
+- 📝 **启动日志**: 完整的启动日志记录便于调试
 
 ### 1.3 应用场景
 
@@ -70,6 +74,7 @@
 | Vite | 7.0.4 | 构建工具 |
 | Tailwind CSS | 3.4.0 | 样式框架 |
 | @tauri-apps/api | 2.x | Tauri 前端 API |
+| @dnd-kit | 6.x | 拖拽排序库 |
 
 ### 2.2 后端技术
 
@@ -104,27 +109,40 @@ D:\claude-code-launcher-tauri\
 │
 ├── 📁 src/                          # 前端源码 (React + TypeScript)
 │   ├── main.tsx                     # 应用入口
-│   ├── App.tsx                      # 主应用组件
+│   ├── App.tsx                      # 主应用组件（含路由和拖拽上下文）
 │   ├── index.css                    # 全局样式 (Tailwind)
-│   ├── types.ts                     # 类型定义
 │   ├── api.ts                       # Tauri API 封装
+│   ├── 📁 types/
+│   │   ├── index.ts                 # 通用类型定义
+│   │   └── project.ts               # 项目相关类型
+│   ├── 📁 pages/
+│   │   ├── ProjectListPage.tsx      # 项目列表页（支持拖拽排序）
+│   │   ├── ProjectCreatePage.tsx    # 新建项目页
+│   │   └── ProjectEditPage.tsx      # 编辑项目页
 │   └── 📁 components/
 │       ├── DependencyFrame.tsx      # 依赖检测面板
-│       └── ConfigPanel.tsx          # 配置参数面板
+│       ├── ProjectCard.tsx          # 项目卡片组件
+│       ├── ProjectForm.tsx          # 项目表单（含置顶开关）
+│       ├── SortableProjectCard.tsx  # 可拖拽项目卡片
+│       ├── DirectoryPicker.tsx      # 目录选择器
+│       └── ConfirmDialog.tsx        # 确认对话框
 │
 ├── 📁 src-tauri/                    # 后端源码 (Rust)
 │   ├── 📁 src/
 │   │   ├── main.rs                  # Rust 入口 (主函数)
-│   │   ├── lib.rs                   # Tauri 应用构建 (27 个 Commands)
+│   │   ├── lib.rs                   # Tauri 应用构建 (34 个 Commands)
 │   │   ├── 📁 commands/             # Tauri Commands 层
 │   │   │   └── mod.rs               # 所有 Commands 定义
+│   │   ├── 📁 models/               # 数据模型
+│   │   │   ├── mod.rs               # 模块导出
+│   │   │   └── project.rs           # 项目数据结构 (Project, ProjectConfig)
 │   │   └── 📁 services/             # 核心业务逻辑
 │   │       ├── mod.rs               # 模块导出
-│   │       ├── dependency_checker.rs    # 依赖检测服务 (含 Git Bash)
+│   │       ├── dependency_checker.rs    # 依赖检测服务 (含 Git Bash, PATH 刷新)
 │   │       ├── installer.rs             # 安装/更新服务
-│   │       ├── launcher.rs              # 启动器服务 (含 Bash 命令生成)
+│   │       ├── launcher.rs              # 启动器服务 (EncodedCommand, 日志)
 │   │       ├── settings_manager.rs      # Claude 设置管理
-│   │       ├── config_storage.rs        # 应用配置存储 (含 skip_permissions)
+│   │       ├── config_storage.rs        # 应用配置存储 (V2 多项目支持)
 │   │       └── environment.rs           # 环境变量管理
 │   │
 │   ├── Cargo.toml                   # Rust 依赖配置
@@ -272,21 +290,72 @@ brew install git
 
 #### 4.2.3 配置持久化
 
-**应用配置** (`%APPDATA%\ClaudeCodeLauncher\config.json` 或 macOS: `~/Library/Application Support/ClaudeCodeLauncher/config.json`):
+**V2 配置格式（多项目支持）** (`%APPDATA%\ClaudeCodeLauncher\config.json` 或 macOS: `~/Library/Application Support/ClaudeCodeLauncher/config.json`):
 ```json
 {
-  "mode": "custom",
-  "proxy": "",
-  "model": "qwen3-coder-480b-a35b",
-  "base_url": "http://litellm.uattest.weoa.com",
-  "token": "base64_encoded_token",
-  "skip_permissions": true
+  "version": 2,
+  "projects": [
+    {
+      "id": "uuid-string",
+      "name": "默认项目",
+      "working_directory": "C:\\Users\\username",
+      "config": {
+        "mode": "claude",
+        "proxy": "",
+        "model": "",
+        "base_url": "",
+        "token": "base64_encoded_token",
+        "skip_permissions": true
+      },
+      "is_default": true,
+      "is_pinned": false,
+      "pinned_at": null,
+      "sort_order": 0,
+      "created_at": 1706918400,
+      "updated_at": 1706918400,
+      "last_launched_at": null
+    }
+  ]
 }
 ```
+
+**V1 到 V2 自动迁移**:
+- 系统自动检测配置版本
+- V1 格式会自动迁移为 V2 格式
+- 迁移后原配置变为"默认项目"
+
+**配置特性**:
 - 窗口关闭时自动保存
 - 下次启动自动加载
 - Token 使用 Base64 编码存储
 - `skip_permissions`: 是否启用 `--dangerously-skip-permissions` 模式
+- `is_pinned`: 是否置顶项目
+- `pinned_at`: 置顶时间戳（用于置顶项目排序）
+- `sort_order`: 排序序号（用于普通项目排序）
+
+### 4.2.4 拖拽排序与置顶
+
+**排序优先级**:
+```
+1. 默认项目 (is_default = true) - 固定第一位，不可拖拽
+2. 置顶项目 (is_pinned = true)  - 按 pinned_at 时间倒序，可拖拽互换
+3. 普通项目 (is_pinned = false) - 按 sort_order 排序，可拖拽互换
+```
+
+**拖拽规则**:
+- 默认项目固定在列表第一位，不可拖拽
+- 置顶项目只能在置顶区域内互换位置
+- 普通项目只能在普通区域内互换位置
+- 不允许跨区域拖拽（置顶 ↔ 普通）
+
+**置顶功能**:
+- 在项目编辑页面可开启/关闭置顶
+- 新置顶的项目排在现有置顶项目的最前面
+- 取消置顶后，项目移到普通区域末尾
+
+**新项目位置**:
+- 新创建的项目默认排在所有置顶项目之后
+- `sort_order` 自动设置为当前最大值 + 1
 
 **Claude 设置** (`~/.claude/settings.json`):
 ```json
@@ -308,40 +377,55 @@ brew install git
 
 **启动流程**:
 1. 验证配置参数
-2. 生成环境变量配置
-3. 创建 PowerShell 脚本
-4. 在新控制台窗口启动 Claude Code
+2. 刷新系统 PATH 环境变量（从注册表获取最新值）
+3. 检测 Claude 命令是否可用
+4. 生成环境变量配置（使用单引号避免转义问题）
+5. 将命令编码为 UTF-16LE Base64 格式（-EncodedCommand）
+6. 使用 `cmd.exe /c start` 创建真正的交互式控制台窗口
+7. 启动 Claude Code 并记录日志
 
 **生成的 PowerShell 命令**:
 ```powershell
-# Claude 原版模式
-& { $env:HTTP_PROXY="http://127.0.0.1:7890"; $env:HTTPS_PROXY="http://127.0.0.1:7890"; claude }
+# Claude 原版模式（使用单引号）
+$env:HTTP_PROXY='http://127.0.0.1:7890'; $env:HTTPS_PROXY='http://127.0.0.1:7890'; claude --dangerously-skip-permissions
 
 # 自定义模型模式
-& { $env:ANTHROPIC_MODEL="qwen3-coder-480b-a35b"; $env:ANTHROPIC_BASE_URL="http://litellm.uattest.weoa.com"; $env:ANTHROPIC_AUTH_TOKEN="your-token"; claude }
+$env:ANTHROPIC_MODEL='qwen3-coder-480b-a35b'; $env:ANTHROPIC_BASE_URL='http://litellm.uattest.weoa.com'; $env:ANTHROPIC_AUTH_TOKEN='your-token'; claude --dangerously-skip-permissions
 ```
 
+**启动机制改进**:
+- 使用 `cmd.exe /c start "Claude Code" powershell.exe -EncodedCommand ...`
+- `-EncodedCommand` 将命令编码为 Base64，完全避免命令行参数解析问题
+- `cmd.exe start` 确保创建真正的交互式控制台（GUI 应用直接启动 PowerShell 可能导致无 TTY）
+- 使用单引号 `'value'` 设置环境变量，避免双引号转义问题
+
+**日志功能**:
+- 日志目录：`%LOCALAPPDATA%\ClaudeCodeLauncher\logs\`
+- `launcher.log`：启动器操作日志（含敏感信息脱敏）
+- `powershell-transcript.log`：PowerShell 会话 transcript
+- `claude-run.log`：Claude 运行日志
+
 **特性**:
-- 脚本块 `& { }` 确保环境变量在同一作用域
 - 使用 `-NoExit` 参数保持窗口打开
-- 在用户主目录启动
-- CREATE_NEW_CONSOLE flag 创建独立窗口
+- 支持指定工作目录启动
+- 自动刷新 PATH 确保新安装的依赖可被发现
+- 完整的日志记录便于调试
 
 #### 4.3.2 命令生成
 
-**PowerShell 格式**:
+**PowerShell 格式**（使用单引号）:
 ```powershell
-$env:VAR1="value1";$env:VAR2="value2";claude --dangerously-skip-permissions
+Set-Location -LiteralPath 'C:\path\to\project';$env:VAR1='value1';$env:VAR2='value2';claude --dangerously-skip-permissions
 ```
 
 **CMD 格式**:
 ```cmd
-set VAR1=value1 & set VAR2=value2 & claude --dangerously-skip-permissions
+cd /d "C:\path\to\project" & set VAR1=value1 & set VAR2=value2 & claude --dangerously-skip-permissions
 ```
 
 **Bash 格式** (macOS/Linux/Git Bash):
 ```bash
-VAR1="value1" VAR2="value2" claude --dangerously-skip-permissions
+cd "C:/path/to/project" && export VAR1="value1" && export VAR2="value2" && claude --dangerously-skip-permissions
 ```
 
 **功能**:
@@ -921,8 +1005,13 @@ jobs:
 ### 10.2 功能实现
 
 🚀 **多方法检测**: Node.js、Claude Code 和 Git Bash 多种检测方法提高成功率
-🚀 **智能 PATH 管理**: 自动刷新系统 PATH，避免重复路径
+🚀 **智能 PATH 管理**: 自动从 Windows 注册表刷新 PATH，确保新安装的依赖可被发现
 🚀 **配置双层存储**: 应用配置 + Claude 设置，灵活持久化
+🚀 **多项目支持**: V2 配置格式支持多个独立项目，每个项目有独立的工作目录和配置
+🚀 **拖拽排序**: 基于 @dnd-kit 实现流畅的拖拽排序，支持分组约束
+🚀 **置顶功能**: 重要项目可置顶显示，置顶项目按时间倒序排列
+🚀 **可靠启动机制**: 使用 `cmd.exe /c start` + `-EncodedCommand` 确保交互式控制台正常工作
+🚀 **完整日志记录**: 启动日志、PowerShell transcript、运行日志便于调试
 🚀 **跨平台支持**: Windows 和 macOS 条件编译，平台特定实现
 🚀 **CI/CD 自动化**: GitHub Actions 实现跨平台自动打包发布
 🚀 **跳过权限确认**: 支持 `--dangerously-skip-permissions` 自动化模式
@@ -947,12 +1036,15 @@ jobs:
 
 **Claude Code Launcher Tauri** 是一个设计精良、功能完整的桌面应用程序，展示了现代桌面应用开发的最佳实践：
 
-- ✅ 使用 Tauri 实现跨平台桌面应用 (Windows + macOS)
-- ✅ React + TypeScript 构建现代前端
+- ✅ 使用 Tauri 2 实现跨平台桌面应用 (Windows + macOS)
+- ✅ React 19 + TypeScript 构建现代前端
 - ✅ Rust 实现高性能系统级操作
 - ✅ 深度集成 Windows 和 macOS 系统功能
 - ✅ 完善的依赖管理 (Node.js、Claude Code、Git Bash)
-- ✅ 配置持久化和权限控制
+- ✅ V2 多项目配置支持，每个项目独立工作目录和配置
+- ✅ 可靠的启动机制 (EncodedCommand + cmd.exe start)
+- ✅ 完整的日志记录系统便于调试
+- ✅ 配置自动迁移 (V1 → V2)
 - ✅ GitHub Actions CI/CD 自动化构建
 - ✅ 优秀的用户体验和界面设计
 
