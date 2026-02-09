@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { MODEL_OPTIONS } from '../types';
 
 interface ConfigPanelProps {
   mode: 'claude' | 'custom';
@@ -43,7 +42,6 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   platform,
 }) => {
   const [showToken, setShowToken] = useState(false);
-  const [showModelDropdown, setShowModelDropdown] = useState(false);
 
   return (
     <div className="px-5 py-3">
@@ -105,42 +103,14 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
             <label className="block text-[12px] px-5 py-1">
               Model Name (可选):
             </label>
-            <div className="relative mx-5" style={{ width: 'calc(100% - 40px)' }}>
-              <input
-                type="text"
-                value={model}
-                onChange={(e) => onModelChange(e.target.value)}
-                onFocus={() => setShowModelDropdown(true)}
-                placeholder="选择或输入模型名称"
-                className="w-full px-3 py-2 pr-8 bg-[#343638] border border-[#565B5E] rounded text-[12px] focus:border-[#3b82f6] focus:outline-none"
-              />
-              <button
-                type="button"
-                onClick={() => setShowModelDropdown(!showModelDropdown)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-[#999999] hover:text-[#DCE4EE] text-[12px]"
-              >
-                ▼
-              </button>
-              {showModelDropdown && (
-                <div
-                  className="absolute z-10 w-full mt-1 bg-[#343638] border border-[#565B5E] rounded shadow-lg max-h-40 overflow-auto dropdown-menu"
-                  onMouseLeave={() => setShowModelDropdown(false)}
-                >
-                  {MODEL_OPTIONS.map((opt) => (
-                    <div
-                      key={opt}
-                      onClick={() => {
-                        onModelChange(opt);
-                        setShowModelDropdown(false);
-                      }}
-                      className="px-3 py-2 text-[12px] hover:bg-[#565B5E] cursor-pointer"
-                    >
-                      {opt}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <input
+              type="text"
+              value={model}
+              onChange={(e) => onModelChange(e.target.value)}
+              placeholder="输入模型名称，留空使用默认模型"
+              className="w-full px-3 py-2 bg-[#343638] border border-[#565B5E] rounded text-[12px] mx-5"
+              style={{ width: 'calc(100% - 40px)' }}
+            />
           </div>
 
           {/* Base URL */}

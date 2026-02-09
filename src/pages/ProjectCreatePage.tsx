@@ -58,11 +58,13 @@ export const ProjectCreatePage: React.FC = () => {
     }
   };
 
-  const handleSubmit = async (name: string, workingDirectory: string, config: ProjectConfig, _isPinned: boolean) => {
+  const handleSubmit = async (name: string, workingDirectory: string, config: ProjectConfig, isPinned: boolean) => {
     try {
       setSaving(true);
-      // Note: new projects are created without pinning, isPinned can be set after creation via edit
-      await projectApi.create(name, workingDirectory, config);
+      const project = await projectApi.create(name, workingDirectory, config);
+      if (isPinned) {
+        await projectApi.togglePinned(project.id, true);
+      }
       navigate('/');
     } catch (err: any) {
       alert(`创建失败: ${err}`);

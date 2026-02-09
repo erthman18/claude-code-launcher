@@ -1,7 +1,7 @@
 # 前端开发指南
 
 > **技术栈**: React 19 + TypeScript + Vite + Tailwind CSS
-> **最后更新**: 2026-02-03
+> **最后更新**: 2026-02-09
 
 ---
 
@@ -122,7 +122,7 @@ function App() {
 |------|------|--------|------|
 | `mode` | `'claude' \| 'custom'` | `'claude'` | 工作模式 |
 | `proxy` | `string` | `''` | 代理地址 |
-| `model` | `string` | `'qwen3-coder-480b-a35b'` | 自定义模型名称 |
+| `model` | `string` | `''` | 自定义模型名称（可留空） |
 | `baseUrl` | `string` | `'http://...'` | 自定义 API 地址 |
 | `token` | `string` | `''` | 认证令牌 |
 | `copySuccess` | `boolean` | `false` | 复制成功提示 |
@@ -197,10 +197,7 @@ const validateConfig = (): string | null => {
       return '代理地址必须以 http:// 或 https:// 开头';
     }
   } else {
-    // 自定义模式：验证必填字段
-    if (!model.trim()) {
-      return '请输入模型名称';
-    }
+    // 自定义模式：验证必填字段（model 可留空）
     if (!baseUrl.trim()) {
       return '请输入 Base URL';
     }
@@ -683,30 +680,13 @@ interface ConfigPanelProps {
 
 ```tsx
 const [showToken, setShowToken] = useState(false);
-const [isCustomModel, setIsCustomModel] = useState(false);
 ```
 
 | 状态 | 类型 | 说明 |
 |------|------|------|
 | `showToken` | `boolean` | 是否显示 Token 明文 |
-| `isCustomModel` | `boolean` | 是否使用自定义模型名称 |
 
-#### 3.3.3 模型选项
-
-```tsx
-const MODEL_OPTIONS = [
-  'deepseek-v3',
-  'qwen3-235b-a22b',
-  'qwen3-coder-480b-a35b',
-];
-
-// 检查当前模型是否在预设列表中
-useEffect(() => {
-  setIsCustomModel(!MODEL_OPTIONS.includes(model));
-}, [model]);
-```
-
-#### 3.3.4 UI 布局
+#### 3.3.3 UI 布局
 
 **模式切换**:
 
@@ -778,49 +758,15 @@ const renderCustomMode = () => (
     {/* Model Name */}
     <div>
       <label className="text-white font-semibold mb-2 block">
-        Model Name <span className="text-error">*</span>
+        Model Name (可选)
       </label>
-
-      {/* 预设模型选择 */}
-      {!isCustomModel && (
-        <select
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          className="input-field mb-2"
-        >
-          {MODEL_OPTIONS.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
-      )}
-
-      {/* 自定义模型输入 */}
-      {isCustomModel && (
-        <input
-          type="text"
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          placeholder="输入模型名称"
-          className="input-field mb-2"
-        />
-      )}
-
-      {/* 切换按钮 */}
-      <button
-        onClick={() => {
-          if (isCustomModel) {
-            setModel(MODEL_OPTIONS[0]);
-          } else {
-            setModel('');
-          }
-          setIsCustomModel(!isCustomModel);
-        }}
-        className="text-sm text-primary hover:underline"
-      >
-        {isCustomModel ? '← 使用预设模型' : '→ 使用自定义模型'}
-      </button>
+      <input
+        type="text"
+        value={model}
+        onChange={(e) => setModel(e.target.value)}
+        placeholder="输入模型名称，留空使用默认模型"
+        className="input-field"
+      />
     </div>
 
     {/* Base URL */}
@@ -1118,18 +1064,11 @@ export interface AppConfig {
 export const DEFAULT_CONFIG: AppConfig = {
   mode: 'claude',
   proxy: '',
-  model: 'qwen3-coder-480b-a35b',
+  model: '',                    // 留空使用默认模型
   base_url: 'http://litellm.uattest.weoa.com',
   token: '',
   skip_permissions: true,     // 默认启用跳过权限
 };
-
-// 模型选项
-export const MODEL_OPTIONS = [
-  'deepseek-v3',
-  'qwen3-235b-a22b',
-  'qwen3-coder-480b-a35b',
-];
 ```
 
 **`skip_permissions` 说明**:
@@ -1519,7 +1458,6 @@ import { AppConfig } from "./types";
 
 - 🔮 添加更多自定义主题
 - 🔮 支持配置导入/导出
-- 🔮 添加更多模型预设
 - 🔮 优化加载状态显示
 - 🔮 添加配置验证提示
 - 🔮 支持 Linux 平台

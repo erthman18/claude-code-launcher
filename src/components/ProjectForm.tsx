@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { DirectoryPicker } from './DirectoryPicker';
 import type { ProjectConfig } from '../types/project';
-import { MODEL_OPTIONS } from '../types';
 
 interface ProjectFormProps {
   initialName?: string;
@@ -55,12 +54,11 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
     setIsPinned(initialIsPinned);
   }, [initialIsPinned]);
   const [proxy, setProxy] = useState(initialConfig?.proxy || '');
-  const [model, setModel] = useState(initialConfig?.model || 'qwen3-coder-480b-a35b');
+  const [model, setModel] = useState(initialConfig?.model || '');
   const [baseUrl, setBaseUrl] = useState(initialConfig?.base_url || 'http://litellm.uattest.weoa.com');
   const [token, setToken] = useState(initialConfig?.token || '');
   const [skipPermissions, setSkipPermissions] = useState(initialConfig?.skip_permissions ?? false);
   const [showToken, setShowToken] = useState(false);
-  const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const validate = (): boolean => {
@@ -198,42 +196,13 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
           {/* Model Name */}
           <div>
             <label className="block text-[12px] mb-1">Model Name (可选)</label>
-            <div className="relative">
-              <input
-                type="text"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                onFocus={() => setShowModelDropdown(true)}
-                placeholder="选择或输入模型名称"
-                className="w-full px-3 py-2 pr-8 bg-[#343638] border border-[#565B5E] rounded text-[12px]"
-              />
-              <button
-                type="button"
-                onClick={() => setShowModelDropdown(!showModelDropdown)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-[#999999] hover:text-[#DCE4EE] text-[12px]"
-              >
-                ▼
-              </button>
-              {showModelDropdown && (
-                <div
-                  className="absolute z-10 w-full mt-1 bg-[#343638] border border-[#565B5E] rounded shadow-lg max-h-40 overflow-auto"
-                  onMouseLeave={() => setShowModelDropdown(false)}
-                >
-                  {MODEL_OPTIONS.map((opt) => (
-                    <div
-                      key={opt}
-                      onClick={() => {
-                        setModel(opt);
-                        setShowModelDropdown(false);
-                      }}
-                      className="px-3 py-2 text-[12px] hover:bg-[#565B5E] cursor-pointer"
-                    >
-                      {opt}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <input
+              type="text"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="输入模型名称，留空使用默认模型"
+              className="w-full px-3 py-2 bg-[#343638] border border-[#565B5E] rounded text-[12px]"
+            />
           </div>
 
           {/* Base URL */}

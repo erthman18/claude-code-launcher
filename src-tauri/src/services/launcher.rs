@@ -64,7 +64,7 @@ impl Launcher {
                 if let Some(end_rel) = out[start..].find('\'') {
                     let end = start + end_rel;
                     out.replace_range(start..end, "<redacted>");
-                    search_from = end + 1;
+                    search_from = start + "<redacted>".len() + 1;
                 } else {
                     break;
                 }

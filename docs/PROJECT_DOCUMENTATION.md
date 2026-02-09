@@ -1,7 +1,7 @@
 # Claude Code Launcher Tauri - 完整技术文档
 
 > **项目版本**: 0.1.0
-> **最后更新**: 2026-02-03
+> **最后更新**: 2026-02-09
 > **技术栈**: Tauri 2 + React 19 + TypeScript + Rust + Tailwind CSS
 
 ---
@@ -276,17 +276,18 @@ brew install git
 ```typescript
 // 使用自定义模型 API
 {
-  ANTHROPIC_MODEL: "qwen3-coder-480b-a35b",
+  ANTHROPIC_MODEL: "your-model-name",   // 可选，留空使用默认模型
   ANTHROPIC_BASE_URL: "http://litellm.uattest.weoa.com",
   ANTHROPIC_AUTH_TOKEN: "your-token"
 }
 ```
 
+> **注意**: Model Name 为纯文本输入框，支持留空（留空时不设置 `ANTHROPIC_MODEL`，Claude Code 使用默认模型）。
+
 #### 4.2.2 配置验证
 
 - ✅ 代理地址必须以 `http://` 或 `https://` 开头
 - ✅ Base URL 必须以 `http://` 或 `https://` 开头
-- ✅ 自定义模式下必须提供 Model 和 Base URL
 
 #### 4.2.3 配置持久化
 
@@ -349,7 +350,7 @@ brew install git
 - 不允许跨区域拖拽（置顶 ↔ 普通）
 
 **置顶功能**:
-- 在项目编辑页面可开启/关闭置顶
+- 在项目创建和编辑页面均可开启/关闭置顶
 - 新置顶的项目排在现有置顶项目的最前面
 - 取消置顶后，项目移到普通区域末尾
 
@@ -401,7 +402,7 @@ $env:ANTHROPIC_MODEL='qwen3-coder-480b-a35b'; $env:ANTHROPIC_BASE_URL='http://li
 
 **日志功能**:
 - 日志目录：`%LOCALAPPDATA%\ClaudeCodeLauncher\logs\`
-- `launcher.log`：启动器操作日志（含敏感信息脱敏）
+- `launcher.log`：启动器操作日志（含敏感信息脱敏，`ANTHROPIC_AUTH_TOKEN` 自动替换为 `<redacted>`）
 - `powershell-transcript.log`：PowerShell 会话 transcript
 - `claude-run.log`：Claude 运行日志
 
