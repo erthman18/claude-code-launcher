@@ -37,6 +37,18 @@
     ],
     "macOS": {
       "minimumSystemVersion": "10.13"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU2RjdDMzRCQTlEMEM3NUYKUldSZng5Q3BTOFAzVnFxbU5WQ2V1aXhsVEZjOVFIQldMUDBqY1ZKUnh5WEdmdjUwaS9Wa0UzUTAK",
+      "endpoints": [
+        "https://github.com/erthman18/claude-code-launcher/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

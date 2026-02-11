@@ -7,6 +7,8 @@ import { ProjectEditPage } from './pages/ProjectEditPage';
 import { ProjectCreatePage } from './pages/ProjectCreatePage';
 import { OnboardingOverlay } from './components/OnboardingOverlay';
 import { OnboardingTrigger } from './components/OnboardingTrigger';
+import { UpdateNotification } from './components/UpdateNotification';
+import { useUpdateChecker } from './hooks/useUpdateChecker';
 import { onboardingApi } from './api';
 import './index.css';
 
@@ -38,6 +40,7 @@ function AppContent() {
   const [isDragging, setIsDragging] = useState(false);
   const [droppedPath, setDroppedPath] = useState<string | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const updateChecker = useUpdateChecker();
 
   // 存储自定义拖拽处理器
   const dragHandlersRef = useRef<Set<(path: string) => boolean>>(new Set());
@@ -151,6 +154,15 @@ function AppContent() {
   return (
     <DragContext.Provider value={{ droppedPath, setDroppedPath, registerDragHandler, unregisterDragHandler }}>
       <div className="relative">
+        <UpdateNotification
+          status={updateChecker.status}
+          version={updateChecker.version}
+          progress={updateChecker.progress}
+          error={updateChecker.error}
+          onUpdate={updateChecker.downloadAndInstall}
+          onDismiss={updateChecker.dismiss}
+          onRetry={updateChecker.retry}
+        />
         {/* 拖拽遮罩层 */}
         {isDragging && (
           <div className="fixed inset-0 z-50 bg-[#212121]/90 flex items-center justify-center pointer-events-none">
