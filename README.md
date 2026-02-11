@@ -27,6 +27,12 @@
 - **功能高亮**：逐步高亮关键功能区域，介绍应用功能
 - **随时查看**：右下角帮助按钮可随时重新查看引导
 
+### 自动更新
+- **启动检查**：应用启动后自动检测新版本
+- **一键更新**：发现新版本时顶部横幅提示，点击即可下载安装
+- **下载进度**：显示实时下载进度条
+- **自动重启**：安装完成后自动重启到新版本
+
 ### 其他功能
 - **依赖检测**：自动检测 Node.js、Claude CLI、Git Bash 等依赖
 - **一键安装**：支持一键安装/更新缺失的依赖
@@ -39,6 +45,7 @@
 - **后端**：Rust + Tauri 2
 - **拖拽库**：@dnd-kit
 - **剪贴板**：@tauri-apps/plugin-clipboard-manager (macOS 必需)
+- **自动更新**：@tauri-apps/plugin-updater + GitHub Releases
 
 ## 开发
 
@@ -82,6 +89,7 @@ npm run tauri:build
 | 启动 Claude | ✅ PowerShell | ✅ Terminal.app |
 | 复制命令 | ✅ | ✅ (Tauri 剪贴板 API) |
 | 安装/更新 | ✅ winget | ✅ brew/npm |
+| 自动更新 | ✅ NSIS | ✅ DMG |
 
 ### macOS 特殊处理
 
@@ -89,6 +97,14 @@ macOS GUI 应用不继承 shell 的 PATH 环境变量，因此：
 - **依赖检测**：自动扫描常见安装路径（Homebrew、nvm、pnpm、Volta 等）
 - **启动功能**：通过 Terminal.app 启动，Terminal 会加载完整 PATH
 - **剪贴板**：使用 Tauri 剪贴板插件，而非浏览器 API
+
+## 发版流程
+
+1. 修改 `src-tauri/tauri.conf.json` 和 `package.json` 中的 `version`
+2. 提交并打 tag：`git tag v版本号 && git push origin master --tags`
+3. GitHub Actions 自动构建、签名、生成更新文件，创建 Draft Release
+4. 在 [Releases 页面](https://github.com/Earthling18/claude-code-launcher/releases) 点击 Publish 发布
+5. 已安装的旧版应用下次启动时自动收到更新通知
 
 ## 许可证
 

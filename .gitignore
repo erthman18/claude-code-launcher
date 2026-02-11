@@ -29,3 +29,8 @@ nul
 
 # OS files
 Thumbs.db
+
+# Build artifacts
+*.exe
+*.dmg
+*.sig
