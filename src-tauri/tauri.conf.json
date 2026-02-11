@@ -42,7 +42,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU2RjdDMzRCQTlEMEM3NUYKUldSZng5Q3BTOFAzVnFxbU5WQ2V1aXhsVEZjOVFIQldMUDBqY1ZKUnh5WEdmdjUwaS9Wa0UzUTAK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA2QzMyMDU4MjI3REJDQUMKUldTc3ZIMGlXQ0REQnQxRmh0UmVJYm5aM25LekZYL0xERlFYNmdEa1dVeG1FQ3N6Y1hJWTVxWXEK",
       "endpoints": [
         "https://github.com/erthman18/claude-code-launcher/releases/latest/download/latest.json"
       ],
